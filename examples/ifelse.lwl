@@ -1,0 +1,12 @@
+integer foo = 1
+
+if ( foo > 1 )
+{
+    foo = foo + 1
+}
+else
+{
+    foo = foo - 1
+}
+
+return foo

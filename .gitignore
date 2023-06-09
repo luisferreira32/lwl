@@ -1,0 +1,13 @@
+# common local work dirs
+**/bin
+**/tmp
+.vscode
+
+# binaries and outputs
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out

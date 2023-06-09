@@ -1,0 +1,8 @@
+integer bar = 1
+
+while (bar < 3)
+{
+    bar = bar + 1
+}
+
+return bar
