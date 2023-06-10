@@ -23,8 +23,6 @@ const (
 // goto:token
 type token int
 
-type literal string
-
 const (
 	INVALID token = iota
 	IDENTIFIER
@@ -156,7 +154,7 @@ func (t token) String() string {
 	return tokenStr
 }
 
-func tokenize(name string) (token, literal) {
+func tokenize(name string) (token, string) {
 	tokenValue, ok := stringToToken[name]
 	if ok {
 		return tokenValue, ""
@@ -169,10 +167,41 @@ func tokenize(name string) (token, literal) {
 	_, err := strconv.ParseInt(name, 10, 64)
 	if err != nil {
 		// TODO: re-think it
-		return LITERAL, literal(name)
+		return LITERAL, name
 	}
-	return IDENTIFIER, literal(name)
+	return IDENTIFIER, name
 }
+
+// The Abstract Syntax Tree needs some nodes.
+//
+// goto:ast
+type astNode struct {
+	t token
+	v string
+	n astNodeType
+
+	parent   *astNode
+	children []*astNode
+}
+
+type astNodeType int
+
+const (
+	root astNodeType = iota + 1
+	declaration
+	statement
+)
+
+var (
+	declarationBegin = map[token]struct{}{
+		INTEGER:   {},
+		INTEGER8:  {},
+		INTEGER16: {},
+		INTEGER32: {},
+		INTEGER64: {},
+		FUNCTION:  {},
+	}
+)
 
 // Usage is always a nice thing to offer to the end user.
 // But we're not that nice. So no hints are really given at the moment.
@@ -244,12 +273,11 @@ func main() {
 	// 1. Tokenize
 
 	var (
-		readBuffer = make([]byte, readBufferSize)
-		offSet     int
-		tokenName  string
-		// TODO: this will be part of nodes in the AST
-		tokenList   []token
-		literalList []literal
+		readBuffer     = make([]byte, readBufferSize)
+		offSet         int
+		tokenName      string
+		tokenList      []token
+		tokenValueList []string
 	)
 
 	for {
@@ -264,6 +292,15 @@ func main() {
 		offSet = 0
 		for {
 			if offSet >= readBytes {
+				// TODO: there ought to be a more graceful way to handle this
+				// or should we just enforce that there needs to ALWAYS be a newline at
+				// then end of the file?
+				if tokenName != "" {
+					newToken, newLiteral := tokenize(tokenName)
+					tokenList = append(tokenList, newToken)
+					tokenValueList = append(tokenValueList, newLiteral)
+				}
+				tokenName = ""
 				break
 			}
 			currentRune, offSetIncrement := utf8.DecodeRune(readBuffer[offSet:])
@@ -276,7 +313,7 @@ func main() {
 				if tokenName != "" {
 					newToken, newLiteral := tokenize(tokenName)
 					tokenList = append(tokenList, newToken)
-					literalList = append(literalList, newLiteral)
+					tokenValueList = append(tokenValueList, newLiteral)
 				}
 				tokenName = ""
 				continue
@@ -287,6 +324,38 @@ func main() {
 	}
 
 	// 2. AST
+	astRoot := astNode{
+		v: "start of the program!",
+		n: root,
+	}
+	astCurrentNode := &astRoot
+
+	for i, t := range tokenList {
+		_, ok := declarationBegin[t]
+		if ok {
+			astNewNode := &astNode{
+				t:      t,
+				v:      tokenValueList[i],
+				n:      declaration,
+				parent: astCurrentNode,
+			}
+			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
+			astCurrentNode = astNewNode
+			continue
+		}
+
+		astNewNode := &astNode{
+			t:      t,
+			v:      tokenValueList[i],
+			n:      statement,
+			parent: astCurrentNode,
+		}
+		astCurrentNode.children = append(astCurrentNode.children, astNewNode)
+
+		// TODO: actually do more than declaration
+		//
+		// gracefullyHandleTheError(fmt.Errorf("unknown token %v, %s, %s", t, t, tokenValueList[i]))
+	}
 
 	// 3. ...
 
@@ -294,6 +363,19 @@ func main() {
 
 	fmt.Printf("We are working on compiling this... currently we got the list of tokens:\n")
 	for i := 0; i < len(tokenList); i++ {
-		fmt.Printf("token, literal: %d - %s, %s\n", tokenList[i], tokenList[i], literalList[i])
+		fmt.Printf("token, name: %d - %s, %s\n", tokenList[i], tokenList[i], tokenValueList[i])
+	}
+	fmt.Printf("And this AST:\n")
+	walk(&astRoot, "")
+}
+
+// TODO: delete this
+func walk(n *astNode, indent string) {
+	if n == nil {
+		return
+	}
+	fmt.Printf("%vnode: %d, %s, %s\n", indent, n.n, n.v, n.t)
+	for _, v := range n.children {
+		walk(v, indent+" ")
 	}
 }

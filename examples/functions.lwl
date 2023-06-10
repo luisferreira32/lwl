@@ -1,8 +1,8 @@
-function integer_sum(foo integer, bar integer)
+function integer_sum ( foo integer bar integer )
 integer
 {
     foobar = foo + bar
     return foobar
 }
 
-return integer_sum(0, 0)
+return integer_sum ( 0 0 )
