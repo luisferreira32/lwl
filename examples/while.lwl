@@ -1,4 +1,5 @@
-integer bar = 1
+integer bar
+bar = 1
 
 while (bar < 3)
 {

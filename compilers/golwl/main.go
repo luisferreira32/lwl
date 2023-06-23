@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -18,6 +19,11 @@ const (
 	readBufferSize = 1024
 )
 
+const (
+	// TODO: do a better handling in different OS
+	lineBreak = '\n'
+)
+
 // The magic tokens for our lexicon!
 //
 // goto:token
@@ -25,6 +31,7 @@ type token int
 
 const (
 	INVALID token = iota
+
 	IDENTIFIER
 	LITERAL
 
@@ -157,7 +164,7 @@ func (t token) String() string {
 func tokenize(name string) (token, string) {
 	tokenValue, ok := stringToToken[name]
 	if ok {
-		return tokenValue, ""
+		return tokenValue, name
 	}
 	// We currently assume that we only deal in integers, and the max
 	// size for an integer will be 64 bits. Then we'll worry later the
@@ -167,9 +174,9 @@ func tokenize(name string) (token, string) {
 	_, err := strconv.ParseInt(name, 10, 64)
 	if err != nil {
 		// TODO: re-think it
-		return LITERAL, name
+		return IDENTIFIER, name
 	}
-	return IDENTIFIER, name
+	return LITERAL, name
 }
 
 // The Abstract Syntax Tree needs some nodes.
@@ -179,6 +186,8 @@ type astNode struct {
 	t token
 	v string
 	n astNodeType
+
+	lineNumber int
 
 	parent   *astNode
 	children []*astNode
@@ -190,17 +199,23 @@ const (
 	root astNodeType = iota + 1
 	declaration
 	statement
+	enclosedStatement
 )
 
 var (
-	declarationBegin = map[token]struct{}{
-		INTEGER:   {},
-		INTEGER8:  {},
-		INTEGER16: {},
-		INTEGER32: {},
-		INTEGER64: {},
-		FUNCTION:  {},
+	declarationBegin = map[token]bool{
+		INTEGER:   true,
+		INTEGER8:  true,
+		INTEGER16: true,
+		INTEGER32: true,
+		INTEGER64: true,
+		FUNCTION:  true,
 	}
+	statementBegin = map[token]bool{
+		IF:    true,
+		WHILE: true,
+	}
+	statementEnd = map[token]bool{}
 )
 
 // Usage is always a nice thing to offer to the end user.
@@ -226,6 +241,14 @@ a couple flags, but I won't spoil the fun, read the source code!
 `, greeting, binName)
 }
 
+// The best way to handle errors, ours, or theirs.
+//
+// goto:error_handling
+var (
+	compileErrDB     = []string{}
+	compileErrDBLock = sync.Mutex{}
+)
+
 func gracefullyHandleTheError(err error) {
 	panic(err)
 }
@@ -241,6 +264,22 @@ stack:
 `, version, recovered, debug.Stack())
 		os.Exit(1)
 	}
+}
+
+func addCompileErr(compileErr ...string) {
+	compileErrDBLock.Lock()
+	defer compileErrDBLock.Unlock()
+	compileErrDB = append(compileErrDB, compileErr...)
+}
+
+func getCompileErrs() string {
+	compileErrDBLock.Lock()
+	defer compileErrDBLock.Unlock()
+	r := ""
+	for _, v := range compileErrDB {
+		r += v
+	}
+	return r
 }
 
 // Our glorious main! It will live as long as lwl does not know how to
@@ -270,15 +309,21 @@ func main() {
 		_ = fileToCompile.Close()
 	}()
 
-	// 1. Tokenize
+	// 1. Tokenize & build the AST
 
 	var (
-		readBuffer     = make([]byte, readBufferSize)
-		offSet         int
-		tokenName      string
-		tokenList      []token
-		tokenValueList []string
+		readBuffer   = make([]byte, readBufferSize)
+		offSet       int
+		tokenContent string
+		lineCounter  = 1
+
+		astRoot = astNode{
+			v: "start of the program!",
+			n: root,
+		}
+		astCurrentNode = &astRoot
 	)
+	astCurrentNode.parent = &astRoot
 
 	for {
 		readBytes, err := fileToCompile.Read(readBuffer)
@@ -292,15 +337,10 @@ func main() {
 		offSet = 0
 		for {
 			if offSet >= readBytes {
-				// TODO: there ought to be a more graceful way to handle this
-				// or should we just enforce that there needs to ALWAYS be a newline at
-				// then end of the file?
-				if tokenName != "" {
-					newToken, newLiteral := tokenize(tokenName)
-					tokenList = append(tokenList, newToken)
-					tokenValueList = append(tokenValueList, newLiteral)
+				// Gracefully handle RFC 5.
+				if lastRune, _ := utf8.DecodeRune(readBuffer[readBytes-1:]); lastRune != lineBreak {
+					addCompileErr(fmt.Sprintf("[%s:%d] expected line break as the last charecter, got this token: %s", fileNameToCompile, lineCounter, tokenContent))
 				}
-				tokenName = ""
 				break
 			}
 			currentRune, offSetIncrement := utf8.DecodeRune(readBuffer[offSet:])
@@ -309,63 +349,58 @@ func main() {
 			}
 			offSet += offSetIncrement
 
-			if currentRune == '\n' || currentRune == ' ' || currentRune == '	' {
-				if tokenName != "" {
-					newToken, newLiteral := tokenize(tokenName)
-					tokenList = append(tokenList, newToken)
-					tokenValueList = append(tokenValueList, newLiteral)
+			if currentRune == lineBreak || currentRune == ' ' || currentRune == '	' {
+				if tokenContent != "" {
+					newToken, tokenName := tokenize(tokenContent)
+
+					astNewNode := &astNode{
+						t:          newToken,
+						v:          tokenName,
+						lineNumber: lineCounter,
+						parent:     astCurrentNode,
+					}
+					astCurrentNode.children = append(astCurrentNode.children, astNewNode)
+
+					switch {
+					case declarationBegin[newToken]:
+						astNewNode.n = declaration
+						astCurrentNode = astNewNode
+					default:
+						// TODO: actually do more than declaration so we can start to gracefully handle the errors
+						//
+						// gracefullyHandleTheError(fmt.Errorf("unknown token %v, %s, %s", newToken, newToken, tokenContent))
+					}
 				}
-				tokenName = ""
+
+				if currentRune == lineBreak {
+					switch {
+					case astCurrentNode.n == declaration:
+						astCurrentNode = astCurrentNode.parent
+					case astCurrentNode.n == enclosedStatement:
+						addCompileErr(fmt.Sprintf("[%s:%d] unexpected linebreak, did you forget a ')'", fileNameToCompile, lineCounter))
+					default:
+					}
+					lineCounter++
+				}
+				tokenContent = ""
 				continue
 			}
 
-			tokenName += string(currentRune)
+			tokenContent += string(currentRune)
 		}
 	}
 
-	// 2. AST
-	astRoot := astNode{
-		v: "start of the program!",
-		n: root,
-	}
-	astCurrentNode := &astRoot
+	// 2. ???
 
-	for i, t := range tokenList {
-		_, ok := declarationBegin[t]
-		if ok {
-			astNewNode := &astNode{
-				t:      t,
-				v:      tokenValueList[i],
-				n:      declaration,
-				parent: astCurrentNode,
-			}
-			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
-			astCurrentNode = astNewNode
-			continue
-		}
+	// 3. Profit
 
-		astNewNode := &astNode{
-			t:      t,
-			v:      tokenValueList[i],
-			n:      statement,
-			parent: astCurrentNode,
-		}
-		astCurrentNode.children = append(astCurrentNode.children, astNewNode)
-
-		// TODO: actually do more than declaration
-		//
-		// gracefullyHandleTheError(fmt.Errorf("unknown token %v, %s, %s", t, t, tokenValueList[i]))
+	if compileErrs := getCompileErrs(); compileErrs != "" {
+		fmt.Printf("Got compilation error:\n%s\n", compileErrs)
+		return
 	}
 
-	// 3. ...
-
-	// 4. Profit
-
-	fmt.Printf("We are working on compiling this... currently we got the list of tokens:\n")
-	for i := 0; i < len(tokenList); i++ {
-		fmt.Printf("token, name: %d - %s, %s\n", tokenList[i], tokenList[i], tokenValueList[i])
-	}
-	fmt.Printf("And this AST:\n")
+	fmt.Printf("We are working on compiling this...\n")
+	fmt.Printf("at least we got this AST:\n\n")
 	walk(&astRoot, "")
 }
 

@@ -1,6 +1,7 @@
 function integer_sum ( foo integer bar integer )
-integer
+integer32
 {
+    integer32 foobar
     foobar = foo + bar
     return foobar
 }
