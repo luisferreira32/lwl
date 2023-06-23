@@ -6,8 +6,7 @@ A light weight language created to learn how to do a compiler.
 1. We want it simple.
 2. Imports are for the weak, you should be able to write your entire OS in **ONE** file, all with **ORIGINAL** implementations.
 3. Return value is **MANDATORY**, but there can be only **ONE**.
-4. There are **NO** floats! We only deal **EXACT** numbers .
-5. Who writes a file without having an empy new line at the end? Right?
+4. There are **NO** floats! We only deal **EXACT** numbers.
 
 ## Ever changing syntax
 
@@ -17,6 +16,7 @@ The objective of the LWL is to be light weight and that comes with simplicity. T
 * Identifiers are not picky, any sequence of bytes can be an identifier.
 * Comments are for the weak, the code documents itself!
 * Pointers... will be a second thought.
+* If we have a condition we can have an if not, what else?
 
 ## Contribution
 

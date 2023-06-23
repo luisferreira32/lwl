@@ -1,27 +1,19 @@
 package main
 
 import (
-	"errors"
+	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"sync"
-	"unicode/utf8"
 )
 
 const (
 	// TODO: do not manually increment this
 	version = "0.0.1"
-	// TODO: do more than a wild guess on how it should be done
-	readBufferSize = 1024
-)
-
-const (
-	// TODO: do a better handling in different OS
-	lineBreak = '\n'
 )
 
 // The magic tokens for our lexicon!
@@ -209,13 +201,16 @@ var (
 		INTEGER16: true,
 		INTEGER32: true,
 		INTEGER64: true,
-		FUNCTION:  true,
 	}
 	statementBegin = map[token]bool{
+		IDENTIFIER: true,
+	}
+	statementEnd           = map[token]bool{}
+	enclosedStatementBegin = map[token]bool{
 		IF:    true,
 		WHILE: true,
 	}
-	statementEnd = map[token]bool{}
+	enclosedStatementEnd = map[token]bool{}
 )
 
 // Usage is always a nice thing to offer to the end user.
@@ -312,10 +307,8 @@ func main() {
 	// 1. Tokenize & build the AST
 
 	var (
-		readBuffer   = make([]byte, readBufferSize)
-		offSet       int
-		tokenContent string
-		lineCounter  = 1
+		scannerBuffer = bufio.NewScanner(fileToCompile)
+		lineCounter   = 0
 
 		astRoot = astNode{
 			v: "start of the program!",
@@ -325,69 +318,59 @@ func main() {
 	)
 	astCurrentNode.parent = &astRoot
 
-	for {
-		readBytes, err := fileToCompile.Read(readBuffer)
-		if errors.Is(err, io.EOF) {
-			break
+	for scannerBuffer.Scan() {
+		lineCounter++
+
+		line := scannerBuffer.Text()
+		words := strings.Fields(line)
+		if len(words) == 0 {
+			continue
 		}
-		if err != nil {
-			gracefullyHandleTheError(fmt.Errorf("read to buffer of size %d got: %w", readBufferSize, err))
+
+		tokenLine := make(map[string]token, len(words))
+
+		for _, word := range words {
+			newToken, tokenName := tokenize(word)
+			tokenLine[tokenName] = newToken
 		}
 
-		offSet = 0
-		for {
-			if offSet >= readBytes {
-				// Gracefully handle RFC 5.
-				if lastRune, _ := utf8.DecodeRune(readBuffer[readBytes-1:]); lastRune != lineBreak {
-					addCompileErr(fmt.Sprintf("[%s:%d] expected line break as the last charecter, got this token: %s", fileNameToCompile, lineCounter, tokenContent))
-				}
-				break
+		for tokenName, newToken := range tokenLine {
+			astNewNode := &astNode{
+				t:          newToken,
+				v:          tokenName,
+				lineNumber: lineCounter,
+				parent:     astCurrentNode,
 			}
-			currentRune, offSetIncrement := utf8.DecodeRune(readBuffer[offSet:])
-			if currentRune == utf8.RuneError {
-				gracefullyHandleTheError(fmt.Errorf("decoding a rune from buffer %s got: RuneError", readBuffer))
+			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
+
+			// TODO: this is just wrong, we can really only evaluate how the node and children will be at the end of the line
+			switch {
+			case declarationBegin[newToken] && astCurrentNode.n != declaration:
+				astNewNode.n = declaration
+				astCurrentNode = astNewNode
+			case newToken == IDENTIFIER && astCurrentNode.n == declaration:
+				astNewNode.n = declaration
+			case statementBegin[newToken]:
+				astNewNode.n = statement
+			default:
+				// TODO: be nicer in explaining why this should not be here
+				//
+				// addCompileErr(fmt.Sprintf("[%s:%d] unexpected token: %s, %s\n", fileNameToCompile, lineCounter, newToken, tokenName))
 			}
-			offSet += offSetIncrement
-
-			if currentRune == lineBreak || currentRune == ' ' || currentRune == '	' {
-				if tokenContent != "" {
-					newToken, tokenName := tokenize(tokenContent)
-
-					astNewNode := &astNode{
-						t:          newToken,
-						v:          tokenName,
-						lineNumber: lineCounter,
-						parent:     astCurrentNode,
-					}
-					astCurrentNode.children = append(astCurrentNode.children, astNewNode)
-
-					switch {
-					case declarationBegin[newToken]:
-						astNewNode.n = declaration
-						astCurrentNode = astNewNode
-					default:
-						// TODO: actually do more than declaration so we can start to gracefully handle the errors
-						//
-						// gracefullyHandleTheError(fmt.Errorf("unknown token %v, %s, %s", newToken, newToken, tokenContent))
-					}
-				}
-
-				if currentRune == lineBreak {
-					switch {
-					case astCurrentNode.n == declaration:
-						astCurrentNode = astCurrentNode.parent
-					case astCurrentNode.n == enclosedStatement:
-						addCompileErr(fmt.Sprintf("[%s:%d] unexpected linebreak, did you forget a ')'", fileNameToCompile, lineCounter))
-					default:
-					}
-					lineCounter++
-				}
-				tokenContent = ""
-				continue
-			}
-
-			tokenContent += string(currentRune)
 		}
+
+		// NOTE: last operation knowing we finished reading a line of tokens
+		// so feel free to throw any errors at the user
+		switch {
+		case astCurrentNode.n == declaration:
+			astCurrentNode = astCurrentNode.parent
+		case astCurrentNode.n == enclosedStatement:
+			addCompileErr(fmt.Sprintf("[%s:%d] unexpected linebreak, did you forget a ')'\n", fileNameToCompile, lineCounter))
+		default:
+		}
+	}
+	if scannerBuffer.Err() != nil {
+		gracefullyHandleTheError(fmt.Errorf("read to file %s  got: %w", fileNameToCompile, err))
 	}
 
 	// 2. ???
