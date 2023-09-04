@@ -20,10 +20,18 @@ const (
 // The magic tokens for our lexicon!
 //
 // goto:token
-type token int
+type token struct {
+	v tokenType
+	n string
+
+	// metadata
+	lineNumber int
+}
+
+type tokenType int
 
 const (
-	INVALID token = iota
+	INVALID tokenType = iota
 
 	IDENTIFIER
 	LITERAL
@@ -67,7 +75,6 @@ const (
 
 	IF
 	WHILE
-	FUNCTION
 	RETURN
 
 	CURLYLEFT
@@ -78,7 +85,7 @@ const (
 )
 
 var (
-	tokenToString = map[token]string{
+	tokenToString = map[tokenType]string{
 		IDENTIFIER:       "identifier",
 		LITERAL:          "literal",
 		INTEGER:          "integer",
@@ -105,14 +112,13 @@ var (
 		ASSIGN:           "=",
 		IF:               "if",
 		WHILE:            "while",
-		FUNCTION:         "function",
 		RETURN:           "return",
 		CURLYLEFT:        "{",
 		CURLYRIGHT:       "}",
 		PARENTHESISLEFT:  "(",
 		PARENTHESISRIGHT: ")",
 	}
-	stringToToken = map[string]token{
+	stringToToken = map[string]tokenType{
 		"integer":   INTEGER,
 		"integer8":  INTEGER8,
 		"integer16": INTEGER16,
@@ -137,7 +143,6 @@ var (
 		"=":         ASSIGN,
 		"if":        IF,
 		"while":     WHILE,
-		"function":  FUNCTION,
 		"return":    RETURN,
 		"{":         CURLYLEFT,
 		"}":         CURLYRIGHT,
@@ -146,7 +151,7 @@ var (
 	}
 )
 
-func (t token) String() string {
+func (t tokenType) String() string {
 	tokenStr, ok := tokenToString[t]
 	if !ok {
 		return fmt.Sprintf("ops, did not find string for token: %d", t)
@@ -154,10 +159,10 @@ func (t token) String() string {
 	return tokenStr
 }
 
-func tokenize(name string) (token, string) {
+func tokenize(name string) token {
 	tokenValue, ok := stringToToken[name]
 	if ok {
-		return tokenValue, name
+		return token{v: tokenValue, n: name}
 	}
 	// We currently assume that we only deal in integers, and the max
 	// size for an integer will be 64 bits. Then we'll worry later the
@@ -167,20 +172,18 @@ func tokenize(name string) (token, string) {
 	_, err := strconv.ParseInt(name, 10, 64)
 	if err != nil {
 		// TODO: re-think it
-		return IDENTIFIER, name
+		return token{v: IDENTIFIER, n: name}
 	}
-	return LITERAL, name
+	return token{v: LITERAL, n: name}
 }
 
 // The Abstract Syntax Tree needs some nodes.
 //
 // goto:ast
 type astNode struct {
-	t token
-	v string
+	// associated tokens with this astNode
+	t []token
 	n astNodeType
-
-	lineNumber int
 
 	parent   *astNode
 	children []*astNode
@@ -196,22 +199,20 @@ const (
 )
 
 var (
-	declarationBegin = map[token]bool{
+	declarationBegin = map[tokenType]bool{
 		INTEGER:   true,
 		INTEGER8:  true,
 		INTEGER16: true,
 		INTEGER32: true,
 		INTEGER64: true,
 	}
-	statementBegin = map[token]bool{
+	statementBegin = map[tokenType]bool{
 		IDENTIFIER: true,
 	}
-	statementEnd           = map[token]bool{}
-	enclosedStatementBegin = map[token]bool{
+	enclosedStatementBegin = map[tokenType]bool{
 		IF:    true,
 		WHILE: true,
 	}
-	enclosedStatementEnd = map[token]bool{}
 )
 
 // Usage is always a nice thing to offer to the end user.
@@ -317,17 +318,11 @@ func compile() error {
 	var (
 		scannerBuffer = bufio.NewScanner(fileToCompile)
 		lineCounter   = 0
-
-		astRoot = astNode{
-			v: "start of the program!",
-			n: root,
-		}
-		astCurrentNode = &astRoot
-
-		openCurlyBracesCounter = 0
-		openBracketsCounter    = 0
+		// TODO: optimize based on filesize heuristics
+		//
+		// At the moment seemed like a reasonable number for pre-emptive token space allocation.
+		tokenizedFile = make([]token, 0, 1024)
 	)
-	astCurrentNode.parent = nil
 
 	for scannerBuffer.Scan() {
 		lineCounter++
@@ -338,55 +333,106 @@ func compile() error {
 			continue
 		}
 
-		tokenLine := make(map[string]token, len(words))
-
 		for _, word := range words {
-			newToken, tokenName := tokenize(word)
-			tokenLine[tokenName] = newToken
-		}
-
-		for tokenName, newToken := range tokenLine {
-			astNewNode := &astNode{
-				t:          newToken,
-				v:          tokenName,
-				lineNumber: lineCounter,
-				parent:     astCurrentNode,
-			}
-			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
-
-			// TODO: this is just wrong, we can really only evaluate how the node and children will be at the end of the line
-			switch {
-			case declarationBegin[newToken] && astCurrentNode.n != declaration:
-				astNewNode.n = declaration
-				astCurrentNode = astNewNode
-			case newToken == IDENTIFIER && astCurrentNode.n == declaration:
-				astNewNode.n = declaration
-			case statementBegin[newToken]:
-				astNewNode.n = statement
-			default:
-				// TODO: be nicer in explaining why this should not be here
-				//
-				// addCompileErr(fmt.Sprintf("[%s:%d] unexpected token: %s, %s\n", fileNameToCompile, lineCounter, newToken, tokenName))
-			}
-		}
-
-		// NOTE: last operation knowing we finished reading a line of tokens
-		// so feel free to throw any errors at the user
-		switch {
-		case astCurrentNode.n == declaration:
-			astCurrentNode = astCurrentNode.parent
-		case astCurrentNode.n == enclosedStatement:
-			addCompileErr(fmt.Sprintf("[%s:%d] unexpected linebreak, did you forget a ')'\n", fileNameToCompile, lineCounter))
-		default:
+			// tokenize, fill metadata, store
+			tokenizedWord := tokenize(word)
+			tokenizedWord.lineNumber = lineCounter
+			tokenizedFile = append(tokenizedFile, tokenizedWord)
 		}
 	}
+
 	if scannerBuffer.Err() != nil {
 		gracefullyHandleTheError(fmt.Errorf("read to file %s  got: %w", fileNameToCompile, err))
 	}
 
-	// 2. ???
+	// 2. Build the AST
 
-	// 3. Profit
+	var (
+		astRoot = astNode{
+			n: root,
+		}
+		astCurrentNode = &astRoot
+
+		nextExpectedToken  tokenType
+		parenthesisCounter = 0
+	)
+	astCurrentNode.parent = nil
+
+	for _, newToken := range tokenizedFile {
+		astNewNode := &astNode{
+			parent: astCurrentNode,
+		}
+
+		if nextExpectedToken != INVALID && nextExpectedToken != newToken.v {
+			addCompileErr(fmt.Sprintf("[%s:%d] unexpected token, expected '%s', got '%s'\n", fileNameToCompile, newToken.lineNumber, nextExpectedToken, newToken.v))
+		}
+
+		switch {
+		case declarationBegin[newToken.v] && astCurrentNode.n != declaration:
+			// If it's a declaration start a new node for it child to the current node
+			// and expect an identifier next
+			astNewNode.n = declaration
+			astNewNode.t = append(astNewNode.t, newToken)
+			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
+
+			astCurrentNode = astNewNode
+			nextExpectedToken = IDENTIFIER
+
+		case newToken.v == nextExpectedToken && astCurrentNode.n == declaration:
+			// If we were expecting an identifier to the declaration, just add the token
+			// to the relevant node token list.
+			astCurrentNode.t = append(astCurrentNode.t, newToken)
+
+		case statementBegin[newToken.v] && astCurrentNode.n != declaration:
+			// Any statement can be signaled with an identifier, if it has been declared before
+			// and we're not declaring it. It will be comprised of a bunch of tokens
+			astNewNode.n = statement
+			astNewNode.t = append(astNewNode.t, newToken)
+			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
+
+			astCurrentNode = astNewNode
+			// TODO: ensure the identifier has been declared
+
+		case enclosedStatementBegin[newToken.v]:
+			// If we start an enclosed statement we expect two things:
+			// 1. A parenthesis to begin the enclosed statement condition and to end
+			// 2. Curly braces to begin the context of the enclosed statement and to end
+			astNewNode.n = enclosedStatement
+			astNewNode.t = append(astNewNode.t, newToken)
+			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
+
+			astCurrentNode = astNewNode
+			nextExpectedToken = PARENTHESISLEFT
+
+		case newToken.v == nextExpectedToken && astCurrentNode.n == enclosedStatement:
+			// An enclosed statement openned curly braces properly
+			astCurrentNode.t = append(astCurrentNode.t, newToken)
+			parenthesisCounter++
+
+		case newToken.v == PARENTHESISRIGHT && astCurrentNode.n == statement && astCurrentNode.parent.n == enclosedStatement:
+			// An enclosed statement condition closed curly braces properly
+			astCurrentNode = astCurrentNode.parent
+			astCurrentNode.t = append(astCurrentNode.t, newToken)
+			parenthesisCounter--
+			// TODO: verify the condition is boolean
+
+		case newToken.v == PARENTHESISLEFT && astCurrentNode.n == declaration:
+			// This is actually a *FUNCTION* declaration
+			// TODO: handle it -> separate the context into its own branch for variable declarations
+
+		default:
+			addCompileErr(fmt.Sprintf("[%s:%d] unexpected token: %s, %s\n", fileNameToCompile, newToken.lineNumber, newToken.v, newToken.n))
+		}
+		// TODO: account for functions
+	}
+	if parenthesisCounter != 0 {
+		// TODO: indicate lines
+		addCompileErr(fmt.Sprintf("[%s:xxx] unexpected open/closed (+/-) parenthesis: %v\n", fileNameToCompile, parenthesisCounter))
+	}
+
+	// 3. ???
+
+	// 4. Profit
 
 	if compileErrs := getCompileErrs(); compileErrs != "" {
 		return fmt.Errorf("%w:\n%s\n", errOnCompile, compileErrs) // nolint // it's to display to the user
@@ -427,7 +473,7 @@ func walk(n *astNode, indent string) {
 	if n == nil {
 		return
 	}
-	fmt.Printf("%vnode: %d, %s, %s\n", indent, n.n, n.v, n.t)
+	fmt.Printf("%vnode: %d, %v\n", indent, n.n, n.t)
 	for _, v := range n.children {
 		walk(v, indent+" ")
 	}
