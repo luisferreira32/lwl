@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -240,6 +241,10 @@ a couple flags, but I won't spoil the fun, read the source code!
 //
 // goto:error_handling
 var (
+	errMisusage       = fmt.Errorf("Misusage")
+	errGrossMissusage = fmt.Errorf("Gross misusage")
+	errOnCompile      = fmt.Errorf("Compiler error")
+
 	compileErrDB     = []string{}
 	compileErrDBLock = sync.Mutex{}
 )
@@ -247,16 +252,21 @@ var (
 func gracefullyHandleTheError(err error) {
 	panic(err)
 }
-func catchTheGracefulHandler() {
-	if recovered := recover(); recovered != nil {
-		fmt.Printf(`There seems to be a technical problem, you can open a github 
+
+func issuePrint(info interface{}, stack []byte) {
+	fmt.Printf(`There seems to be a technical problem, you can open a github 
 issue at github.com/luisferreira32/lwl with the following output:
 
 version: %s
 err: %s
 stack:
 %s
-`, version, recovered, debug.Stack())
+`, version, info, stack)
+}
+
+func catchTheGracefulHandler() {
+	if recovered := recover(); recovered != nil {
+		issuePrint(recovered, debug.Stack())
 		os.Exit(1)
 	}
 }
@@ -277,22 +287,20 @@ func getCompileErrs() string {
 	return r
 }
 
-// Our glorious main! It will live as long as lwl does not know how to
+// Our glorious compiler! It will live as long as lwl does not know how to
 // compile itself.
 //
-// goto:main
-func main() {
+// goto:compile
+func compile() error {
 	defer catchTheGracefulHandler()
 
 	if len(os.Args) < 2 || os.Args[1] == "--help" || os.Args[1] == "-h" {
-		usage(os.Args[0], false)
-		return
+		return errMisusage
 	}
 
 	// TODO: actually have some flags for helping out and then do this check
 	if len(os.Args) > 2 {
-		usage(os.Args[0], true, "We only allow ONE file!")
-		return
+		return fmt.Errorf("%w: We only allow ONE file, %v given!", errGrossMissusage, len(os.Args)-1) // nolint // it's to display to the user
 	}
 
 	fileNameToCompile := filepath.Clean(os.Args[1])
@@ -304,7 +312,7 @@ func main() {
 		_ = fileToCompile.Close()
 	}()
 
-	// 1. Tokenize & build the AST
+	// 1. Tokenize in memory
 
 	var (
 		scannerBuffer = bufio.NewScanner(fileToCompile)
@@ -315,8 +323,11 @@ func main() {
 			n: root,
 		}
 		astCurrentNode = &astRoot
+
+		openCurlyBracesCounter = 0
+		openBracketsCounter    = 0
 	)
-	astCurrentNode.parent = &astRoot
+	astCurrentNode.parent = nil
 
 	for scannerBuffer.Scan() {
 		lineCounter++
@@ -378,13 +389,37 @@ func main() {
 	// 3. Profit
 
 	if compileErrs := getCompileErrs(); compileErrs != "" {
-		fmt.Printf("Got compilation error:\n%s\n", compileErrs)
-		return
+		return fmt.Errorf("%w:\n%s\n", errOnCompile, compileErrs) // nolint // it's to display to the user
 	}
 
 	fmt.Printf("We are working on compiling this...\n")
 	fmt.Printf("at least we got this AST:\n\n")
 	walk(&astRoot, "")
+	return nil
+}
+
+// Our glorious main! It will live as long as lwl does not know how to
+// compile itself.
+//
+// goto:main
+func main() {
+	err := compile()
+	switch {
+	case err == nil:
+		os.Exit(0)
+	case errors.Is(err, errMisusage):
+		usage(os.Args[0], false)
+		os.Exit(1)
+	case errors.Is(err, errGrossMissusage):
+		usage(os.Args[0], true, err.Error())
+		os.Exit(1)
+	case errors.Is(err, errOnCompile):
+		fmt.Printf("%v", err.Error())
+		os.Exit(1)
+	default:
+		issuePrint(err.Error(), []byte("unexpected"))
+		os.Exit(1)
+	}
 }
 
 // TODO: delete this

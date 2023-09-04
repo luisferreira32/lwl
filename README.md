@@ -16,7 +16,7 @@ The objective of the LWL is to be light weight and that comes with simplicity. T
 * Identifiers are not picky, any sequence of bytes can be an identifier.
 * Comments are for the weak, the code documents itself!
 * Pointers... will be a second thought.
-* If we have a condition we can have an if not, what else?
+* If we have an if condition we can have an if not, what else?
 
 ## Contribution
 
