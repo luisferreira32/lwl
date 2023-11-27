@@ -163,6 +163,9 @@ type astNode struct {
 
 	parent   *astNode
 	children []*astNode
+
+	// metadata
+	line int
 }
 
 type astNodeType int
@@ -210,109 +213,9 @@ var (
 	}
 )
 
-// Usage is always a nice thing to offer to the end user.
-// But we're not that nice. So no hints are really given at the moment.
-//
-// goto:usage
-func usage(binName string, angry bool, angryReasons ...string) {
-	var greeting string
-	if angry {
-		greeting = "You have failed the lwl compiler! How could you?\n"
-		for _, reason := range angryReasons {
-			greeting += " * " + reason + "\n"
-		}
-		greeting += "Might as well explain it to you."
-	} else {
-		greeting = "Welcome to the lwl compiler!"
-	}
-	fmt.Printf(`%s The usage is pretty simple:
-	%s file.lwl
-
-It will write the executable as a "file.magic". You can also define 
-a couple flags, but I won't spoil the fun, read the source code!
-`, greeting, binName)
-}
-
-// The best way to handle errors, ours, or theirs.
-//
-// goto:error_handling
-var (
-	errMisusage       = fmt.Errorf("Misusage")
-	errGrossMissusage = fmt.Errorf("Gross misusage")
-	errOnCompile      = fmt.Errorf("Compiler error")
-
-	compileErrDB     = []string{}
-	compileErrDBLock = sync.Mutex{}
-)
-
-func gracefullyHandleTheError(err error) {
-	panic(err)
-}
-
-func issuePrint(info interface{}, stack []byte) {
-	fmt.Printf(`There seems to be a technical problem, you can open a github 
-issue at github.com/luisferreira32/lwl with the following output:
-
-version: %s
-err: %s
-stack:
-%s
-`, version, info, stack)
-}
-
-func catchTheGracefulHandler() {
-	if recovered := recover(); recovered != nil {
-		issuePrint(recovered, debug.Stack())
-		os.Exit(1)
-	}
-}
-
-func addCompileErr(compileErr ...string) {
-	compileErrDBLock.Lock()
-	defer compileErrDBLock.Unlock()
-	compileErrDB = append(compileErrDB, compileErr...)
-}
-
-func getCompileErrs() string {
-	compileErrDBLock.Lock()
-	defer compileErrDBLock.Unlock()
-	r := ""
-	for _, v := range compileErrDB {
-		r += v
-	}
-	return r
-}
-
-// Our glorious compiler! It will live as long as lwl does not know how to
-// compile itself.
-//
-// goto:compile
-func compile() error {
-	defer catchTheGracefulHandler()
-
-	if len(os.Args) < 2 || os.Args[1] == "--help" || os.Args[1] == "-h" {
-		return errMisusage
-	}
-
-	// TODO: actually have some flags for helping out and then do this check
-	if len(os.Args) > 2 {
-		return fmt.Errorf("%w: We only allow ONE file, %v given!", errGrossMissusage, len(os.Args)-1) // nolint // it's to display to the user
-	}
-
-	fileNameToCompile := filepath.Clean(os.Args[1])
-	fileToCompile, err := os.Open(fileNameToCompile)
-	if err != nil {
-		gracefullyHandleTheError(fmt.Errorf("on initial file open %s got: %w", fileNameToCompile, err))
-	}
-	defer func() {
-		_ = fileToCompile.Close()
-	}()
-
-	// Tokenize + build AST
-
+func buildAST(fileNameToCompile string, scannerBuffer *bufio.Scanner) *astNode {
 	var (
-		scannerBuffer = bufio.NewScanner(fileToCompile)
-		lineNumber    = 0
+		lineNumber = 0
 
 		astRoot = astNode{
 			n: root,
@@ -496,8 +399,135 @@ func compile() error {
 	}
 
 	if scannerBuffer.Err() != nil {
-		gracefullyHandleTheError(fmt.Errorf("read to file %s  got: %w", fileNameToCompile, err))
+		gracefullyHandleTheError(fmt.Errorf("read to file %s  got: %w", fileNameToCompile, scannerBuffer.Err()))
 	}
+
+	return &astRoot
+}
+
+// The best way to handle errors, ours, or theirs.
+//
+// goto:error_handling
+var (
+	errMisusage       = fmt.Errorf("Misusage")
+	errGrossMissusage = fmt.Errorf("Gross misusage")
+	errOnCompile      = fmt.Errorf("Compiler error")
+
+	compileErrDB     = []string{}
+	compileErrDBLock = sync.Mutex{}
+)
+
+func gracefullyHandleTheError(err error) {
+	panic(err)
+}
+
+func issuePrint(info interface{}, stack []byte) {
+	fmt.Printf(`There seems to be a technical problem, you can open a github 
+issue at github.com/luisferreira32/lwl with the following output:
+
+version: %s
+err: %s
+stack:
+%s
+`, version, info, stack)
+}
+
+func catchTheGracefulHandler() {
+	if recovered := recover(); recovered != nil {
+		issuePrint(recovered, debug.Stack())
+		os.Exit(1)
+	}
+}
+
+func addCompileErr(compileErr ...string) {
+	compileErrDBLock.Lock()
+	defer compileErrDBLock.Unlock()
+	compileErrDB = append(compileErrDB, compileErr...)
+}
+
+func getCompileErrs() string {
+	compileErrDBLock.Lock()
+	defer compileErrDBLock.Unlock()
+	r := ""
+	for _, v := range compileErrDB {
+		r += v
+	}
+	return r
+}
+
+// Syntax checking comes from the AST.
+//
+// goto:syntax
+func checkChildSyntax(fileName string, n *astNode, declaredVariables, declaredFunctions map[string]bool) {
+	if n == nil {
+		return
+	}
+
+	switch {
+	case n.n == declaration:
+		if declaredVariables[n.t[1].n] || declaredFunctions[n.t[1].n] {
+			addCompileErr(fmt.Sprintf("[%s:%d] re-declaration of %s\n", fileName, n.line, n.t[1].n))
+		}
+		// TODO other declaration checks
+	case n.n == statement:
+		// TODO statement checks
+	case n.n == enclosedStatement:
+		// TODO enclosedStatement checks
+	case n.n == returnStatement:
+		// TODO returnStatement checks
+	case n.n == root:
+		// root just goes to children
+	}
+
+	for _, child := range n.children {
+		if n.n == declaration { // function declaration changes variable scope
+			checkChildSyntax(fileName, child, make(map[string]bool), make(map[string]bool))
+		} else {
+			checkChildSyntax(fileName, child, declaredVariables, declaredFunctions)
+		}
+	}
+}
+
+func parseAST(fileName string, astRoot *astNode) {
+	astCurrentNode := astRoot
+	// TODO: sort this out in terms of scope
+	var (
+		declaredVariables map[string]bool
+		declaredFunctions map[string]bool
+	)
+	checkChildSyntax(fileName, astCurrentNode, declaredVariables, declaredFunctions)
+}
+
+// Our glorious compiler! It will live as long as lwl does not know how to
+// compile itself.
+//
+// goto:compile
+func compile() error {
+	defer catchTheGracefulHandler()
+
+	if len(os.Args) < 2 || os.Args[1] == "--help" || os.Args[1] == "-h" {
+		return errMisusage
+	}
+
+	// TODO: actually have some flags for helping out and then do this check
+	if len(os.Args) > 2 {
+		return fmt.Errorf("%w: We only allow ONE file, %v given!", errGrossMissusage, len(os.Args)-1) // nolint // it's to display to the user
+	}
+
+	fileNameToCompile := filepath.Clean(os.Args[1])
+	fileToCompile, err := os.Open(fileNameToCompile)
+	if err != nil {
+		gracefullyHandleTheError(fmt.Errorf("on initial file open %s got: %w", fileNameToCompile, err))
+	}
+	defer func() {
+		_ = fileToCompile.Close()
+	}()
+
+	// Tokenize + build AST
+	astRoot := buildAST(fileNameToCompile, bufio.NewScanner(fileToCompile))
+
+	// Parse syntax
+	parseAST(fileNameToCompile, astRoot)
 
 	// ???
 
@@ -509,8 +539,31 @@ func compile() error {
 
 	fmt.Printf("We are working on compiling this...\n")
 	fmt.Printf("at least we got this AST:\n\n")
-	walk(&astRoot, "")
+	walk(astRoot, "")
 	return nil
+}
+
+// Usage is always a nice thing to offer to the end user.
+// But we're not that nice. So no hints are really given at the moment.
+//
+// goto:usage
+func usage(binName string, angry bool, angryReasons ...string) {
+	var greeting string
+	if angry {
+		greeting = "You have failed the lwl compiler! How could you?\n"
+		for _, reason := range angryReasons {
+			greeting += " * " + reason + "\n"
+		}
+		greeting += "Might as well explain it to you."
+	} else {
+		greeting = "Welcome to the lwl compiler!"
+	}
+	fmt.Printf(`%s The usage is pretty simple:
+	%s file.lwl
+
+It will write the executable as a "file.magic". You can also define 
+a couple flags, but I won't spoil the fun, read the source code!
+`, greeting, binName)
 }
 
 // Our glorious main! It will live as long as lwl does not know how to
