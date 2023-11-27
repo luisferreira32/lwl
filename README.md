@@ -17,7 +17,16 @@ The objective of the LWL is to be light weight and that comes with simplicity. T
 * Comments are for the weak, the code documents itself!
 * Pointers... will be a second thought.
 * If we have an if condition we can have an if not, what else?
+* We don't lie to ourselves, bools are, in fact, just 8-bit integers.
 
 ## Contribution
 
 Feel free to open issues, pull requests, and/or propose changes in the language. The RFCs (rules to follow coherently) should be... followed.
+
+## Roadmap
+
+- [ ] MVP (AST + syntax check + assembly)
+- [ ] Add concept of structs and arrays
+- [ ] Enable compiler plugins
+- [ ] Demo compiler plugin string to 8 bit integer array
+- [ ] Demo compiler plugin to decide integer type based on architecture to compile

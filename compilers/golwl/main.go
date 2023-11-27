@@ -25,7 +25,6 @@ type token struct {
 	n string
 
 	// metadata
-	lineNumber int
 }
 
 type tokenType int
@@ -60,17 +59,6 @@ const (
 	SHIFTLEFT
 	SHIFTRIGHT
 
-	LOGICALAND
-	LOGICALOR
-	EQUALS
-	LESS
-	GREAT
-	NOT
-	// Yes. You can do less and equal, but it's just not given to you by the
-	// compiler. Off-by-one is my motto.
-	//
-	// TODO: make it easier and add LEQ and GEQ operators
-
 	ASSIGN
 
 	IF
@@ -103,12 +91,6 @@ var (
 		XOR:              "^",
 		SHIFTLEFT:        "<<",
 		SHIFTRIGHT:       ">>",
-		LOGICALAND:       "&&",
-		LOGICALOR:        "||",
-		EQUALS:           "==",
-		LESS:             "<",
-		GREAT:            ">",
-		NOT:              "!",
 		ASSIGN:           "=",
 		IF:               "if",
 		WHILE:            "while",
@@ -134,12 +116,6 @@ var (
 		"^":         XOR,
 		"<<":        SHIFTLEFT,
 		">>":        SHIFTRIGHT,
-		"&&":        LOGICALAND,
-		"||":        LOGICALOR,
-		"==":        EQUALS,
-		"<":         LESS,
-		">":         GREAT,
-		"!":         NOT,
 		"=":         ASSIGN,
 		"if":        IF,
 		"while":     WHILE,
@@ -196,6 +172,7 @@ const (
 	declaration
 	statement
 	enclosedStatement
+	returnStatement
 )
 
 var (
@@ -213,6 +190,24 @@ var (
 		IF:    true,
 		WHILE: true,
 	}
+	bitOperator = map[tokenType]bool{
+		AND:        true,
+		OR:         true,
+		XOR:        true,
+		SHIFTLEFT:  true,
+		SHIFTRIGHT: true,
+	}
+	arithmeticOperator = map[tokenType]bool{
+		ADD:      true,
+		SUBTRACT: true,
+		MULTIPLY: true,
+		QUOCIENT: true,
+		REMAIN:   true,
+	}
+	literalOrIdentifier = map[tokenType]bool{
+		IDENTIFIER: true,
+		LITERAL:    true,
+	}
 )
 
 // Usage is always a nice thing to offer to the end user.
@@ -220,7 +215,7 @@ var (
 //
 // goto:usage
 func usage(binName string, angry bool, angryReasons ...string) {
-	greeting := ""
+	var greeting string
 	if angry {
 		greeting = "You have failed the lwl compiler! How could you?\n"
 		for _, reason := range angryReasons {
@@ -313,19 +308,23 @@ func compile() error {
 		_ = fileToCompile.Close()
 	}()
 
-	// 1. Tokenize in memory
+	// Tokenize + build AST
 
 	var (
 		scannerBuffer = bufio.NewScanner(fileToCompile)
-		lineCounter   = 0
-		// TODO: optimize based on filesize heuristics
-		//
-		// At the moment seemed like a reasonable number for pre-emptive token space allocation.
-		tokenizedFile = make([]token, 0, 1024)
+		lineNumber    = 0
+
+		astRoot = astNode{
+			n: root,
+		}
+		astCurrentNode = &astRoot
+
+		nextExpectedToken tokenType
 	)
+	astCurrentNode.parent = nil
 
 	for scannerBuffer.Scan() {
-		lineCounter++
+		lineNumber++
 
 		line := scannerBuffer.Text()
 		words := strings.Fields(line)
@@ -333,11 +332,166 @@ func compile() error {
 			continue
 		}
 
-		for _, word := range words {
-			// tokenize, fill metadata, store
-			tokenizedWord := tokenize(word)
-			tokenizedWord.lineNumber = lineCounter
-			tokenizedFile = append(tokenizedFile, tokenizedWord)
+		lineTokens := make([]token, len(words))
+		for i, word := range words {
+			// tokenize, fill metadata, and store
+			lineTokens[i] = tokenize(word)
+		}
+
+		astNewNode := &astNode{
+			parent: astCurrentNode,
+		}
+		firstToken := lineTokens[0] // first token decides the line type
+
+		switch {
+		case firstToken.v == CURLYLEFT:
+			// Parse sub-tree start.
+			//
+			// If we expect a CURLYLEFT token, it means the previous line was an enclosed statement or a function
+			// declaration. Just reset the next expected token and continue the parsing.
+			if nextExpectedToken != CURLYLEFT {
+				addCompileErr(fmt.Sprintf("[%s:%d] unexpected token %s\n", fileNameToCompile, lineNumber, firstToken.n))
+				continue
+			}
+			nextExpectedToken = INVALID
+
+		case firstToken.v == CURLYRIGHT:
+			// Parse sub-tree finish.
+			//
+			// It is only possible to stop a sub-tree if we're inside a sub-tree, so check if the parent is present,
+			// i.e., we are not on root node, and point the current node to the parent.
+			if astCurrentNode.parent == nil {
+				addCompileErr(fmt.Sprintf("[%s:%d] unexpected token %s\n", fileNameToCompile, lineNumber, firstToken.n))
+				continue
+			}
+			if nextExpectedToken != CURLYRIGHT && astCurrentNode.n != enclosedStatement {
+				addCompileErr(fmt.Sprintf("[%s:%d] unexpected token %s without a function/if/while\n", fileNameToCompile, lineNumber, firstToken.n))
+				continue
+			}
+			astCurrentNode = astCurrentNode.parent
+
+		case declarationBegin[firstToken.v]:
+			// Parse declarations.
+			//
+			// We expect a declaration to be either a variable declaration or a function declaration.
+			// For that we need a type (variable or return) and an identifier. Given those, if it is
+			// a function declaration we start a sub-tree with the arguments as declarations themselves
+			// inside the sub-tree. To start the sub-tree we just pass the current node pointer to the
+			// function declaration pointer and expect a curly left brace.
+			astNewNode.n = declaration
+			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
+
+			if len(lineTokens) < 2 || lineTokens[1].v != IDENTIFIER {
+				addCompileErr(fmt.Sprintf("[%s:%d] need a name for a declaration\n", fileNameToCompile, lineNumber))
+				continue
+			}
+
+			if len(lineTokens) < 3 {
+				astNewNode.t = lineTokens
+				continue
+			}
+
+			astCurrentNode = astNewNode
+			nextExpectedToken = CURLYLEFT
+
+			if lineTokens[2].v != PARENTHESISLEFT && lineTokens[len(lineTokens)-1].v != PARENTHESISRIGHT {
+				addCompileErr(fmt.Sprintf("[%s:%d] function %v declaration must have parameters enclosed in parenthesis\n", fileNameToCompile, lineNumber, lineTokens[1].n))
+				continue
+			}
+
+			for i := 0; i < (len(lineTokens)-4)/2; i++ {
+				variableTypeIndex := i*2 + 3
+				variableNameIndex := i*2 + 4
+				if variableNameIndex > len(lineTokens)-2 {
+					addCompileErr(fmt.Sprintf("[%s:%d] function %v declaration arguments have to be declared with _type_ and _name_\n", fileNameToCompile, lineNumber, lineTokens[1].n))
+					break
+				}
+				astCurrentNode.children = append(astCurrentNode.children, &astNode{
+					t:      []token{lineTokens[variableTypeIndex], lineTokens[variableNameIndex]},
+					n:      declaration,
+					parent: astCurrentNode,
+				})
+			}
+
+		case statementBegin[firstToken.v]:
+			// Parse a statement.
+			//
+			// When we reach a statement we need to register which kind of operations this statement is going
+			// to include. The syntax check is then later done on the tree to ensure all the operators of the
+			// statement were declared and are valid to use together. Expect a statement to be either an
+			// arithmetic operation, a bit operation, or a function invocation.
+			astNewNode.n = statement
+			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
+
+			if len(lineTokens) < 3 || lineTokens[1].v != ASSIGN || !literalOrIdentifier[lineTokens[2].v] {
+				addCompileErr(fmt.Sprintf("[%s:%d] statement should begin with: %s = ...\n", fileNameToCompile, lineNumber, firstToken.n))
+				continue
+			}
+			astNewNode.t = lineTokens
+
+			if len(lineTokens) < 5 {
+				continue
+			}
+
+			switch {
+			case lineTokens[3].v == PARENTHESISLEFT:
+				if lineTokens[len(lineTokens)-1].v != PARENTHESISRIGHT {
+					addCompileErr(fmt.Sprintf("[%s:%d] function %s invocation expected enclosing parenthesis\n", fileNameToCompile, lineNumber, lineTokens[2].n))
+					continue
+				}
+				for _, token := range lineTokens[4:] {
+					if !literalOrIdentifier[token.v] {
+						addCompileErr(fmt.Sprintf("[%s:%d] function %s invocation expects constant or variable arguments, got %s\n", fileNameToCompile, lineNumber, lineTokens[2].n, token.n))
+						break
+					}
+				}
+			case arithmeticOperator[lineTokens[3].v]:
+				for _, token := range lineTokens[4:] {
+					if !literalOrIdentifier[token.v] && !arithmeticOperator[token.v] {
+						addCompileErr(fmt.Sprintf("[%s:%d] arithmetic operation expects *only* arithmetic operators and constants/variables\n", fileNameToCompile, lineNumber))
+						break
+					}
+				}
+			case bitOperator[lineTokens[3].v]:
+				for _, token := range lineTokens[4:] {
+					if !literalOrIdentifier[token.v] && !bitOperator[token.v] {
+						addCompileErr(fmt.Sprintf("[%s:%d] bit operation statement expects *only* bit operators and constants/variables\n", fileNameToCompile, lineNumber))
+						break
+					}
+				}
+			}
+
+		case enclosedStatementBegin[firstToken.v]:
+			// Parse an enclosed statement.
+			//
+			// The enclosed statement will be done based on a condition, so we expect an identifier to be that condition,
+			// i.e., if the given identifier value at runtime is greater than zero, the sub-tree is processed, otherwise, it is not.
+			astNewNode.n = enclosedStatement
+			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
+
+			if len(lineTokens) != 4 || (lineTokens[1].v != PARENTHESISLEFT && lineTokens[2].v != IDENTIFIER && lineTokens[3].v != PARENTHESISRIGHT) {
+				addCompileErr(fmt.Sprintf("[%s:%d] statement %s expects a variable within braces, i.e., %s ( identifier )\n", fileNameToCompile, lineNumber, firstToken.n, firstToken.n))
+				continue
+			}
+
+			astCurrentNode = astNewNode
+			nextExpectedToken = CURLYLEFT
+			// TODO: ensure the identifier is not a function identifier
+
+		case firstToken.v == RETURN:
+			// Parse the return statement.
+			//
+			// If we return it should be expected that the next token is the closing of curly braces.
+			// But we leave it up to the syntax check to prune the following children from the tree
+			// after the return.
+			astNewNode.n = returnStatement
+			astNewNode.t = lineTokens
+
+			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
+			nextExpectedToken = CURLYRIGHT
+
+		default:
+			addCompileErr(fmt.Sprintf("[%s:%d] unexpected token: %s, %s\n > %v\n", fileNameToCompile, lineNumber, firstToken.v, firstToken.n, words))
 		}
 	}
 
@@ -345,94 +499,9 @@ func compile() error {
 		gracefullyHandleTheError(fmt.Errorf("read to file %s  got: %w", fileNameToCompile, err))
 	}
 
-	// 2. Build the AST
+	// ???
 
-	var (
-		astRoot = astNode{
-			n: root,
-		}
-		astCurrentNode = &astRoot
-
-		nextExpectedToken  tokenType
-		parenthesisCounter = 0
-	)
-	astCurrentNode.parent = nil
-
-	for _, newToken := range tokenizedFile {
-		astNewNode := &astNode{
-			parent: astCurrentNode,
-		}
-
-		if nextExpectedToken != INVALID && nextExpectedToken != newToken.v {
-			addCompileErr(fmt.Sprintf("[%s:%d] unexpected token, expected '%s', got '%s'\n", fileNameToCompile, newToken.lineNumber, nextExpectedToken, newToken.v))
-		}
-
-		switch {
-		case declarationBegin[newToken.v] && astCurrentNode.n != declaration:
-			// If it's a declaration start a new node for it child to the current node
-			// and expect an identifier next
-			astNewNode.n = declaration
-			astNewNode.t = append(astNewNode.t, newToken)
-			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
-
-			astCurrentNode = astNewNode
-			nextExpectedToken = IDENTIFIER
-
-		case newToken.v == nextExpectedToken && astCurrentNode.n == declaration:
-			// If we were expecting an identifier to the declaration, just add the token
-			// to the relevant node token list.
-			astCurrentNode.t = append(astCurrentNode.t, newToken)
-
-		case statementBegin[newToken.v] && astCurrentNode.n != declaration:
-			// Any statement can be signaled with an identifier, if it has been declared before
-			// and we're not declaring it. It will be comprised of a bunch of tokens
-			astNewNode.n = statement
-			astNewNode.t = append(astNewNode.t, newToken)
-			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
-
-			astCurrentNode = astNewNode
-			// TODO: ensure the identifier has been declared
-
-		case enclosedStatementBegin[newToken.v]:
-			// If we start an enclosed statement we expect two things:
-			// 1. A parenthesis to begin the enclosed statement condition and to end
-			// 2. Curly braces to begin the context of the enclosed statement and to end
-			astNewNode.n = enclosedStatement
-			astNewNode.t = append(astNewNode.t, newToken)
-			astCurrentNode.children = append(astCurrentNode.children, astNewNode)
-
-			astCurrentNode = astNewNode
-			nextExpectedToken = PARENTHESISLEFT
-
-		case newToken.v == nextExpectedToken && astCurrentNode.n == enclosedStatement:
-			// An enclosed statement openned curly braces properly
-			astCurrentNode.t = append(astCurrentNode.t, newToken)
-			parenthesisCounter++
-
-		case newToken.v == PARENTHESISRIGHT && astCurrentNode.n == statement && astCurrentNode.parent.n == enclosedStatement:
-			// An enclosed statement condition closed curly braces properly
-			astCurrentNode = astCurrentNode.parent
-			astCurrentNode.t = append(astCurrentNode.t, newToken)
-			parenthesisCounter--
-			// TODO: verify the condition is boolean
-
-		case newToken.v == PARENTHESISLEFT && astCurrentNode.n == declaration:
-			// This is actually a *FUNCTION* declaration
-			// TODO: handle it -> separate the context into its own branch for variable declarations
-
-		default:
-			addCompileErr(fmt.Sprintf("[%s:%d] unexpected token: %s, %s\n", fileNameToCompile, newToken.lineNumber, newToken.v, newToken.n))
-		}
-		// TODO: account for functions
-	}
-	if parenthesisCounter != 0 {
-		// TODO: indicate lines
-		addCompileErr(fmt.Sprintf("[%s:xxx] unexpected open/closed (+/-) parenthesis: %v\n", fileNameToCompile, parenthesisCounter))
-	}
-
-	// 3. ???
-
-	// 4. Profit
+	// Profit
 
 	if compileErrs := getCompileErrs(); compileErrs != "" {
 		return fmt.Errorf("%w:\n%s\n", errOnCompile, compileErrs) // nolint // it's to display to the user

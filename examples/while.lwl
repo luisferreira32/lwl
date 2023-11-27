@@ -1,9 +1,9 @@
 integer bar
-bar = 1
+bar = 3
 
-while ( bar < 3 )
+while ( bar )
 {
-    bar = bar + 1
+    bar = bar - 1
 }
 
 return bar
