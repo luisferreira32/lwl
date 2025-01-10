@@ -7,11 +7,8 @@ linters-settings:
   nakedret:
     max-func-lines: 0
   revive:
-    ignoreGeneratedHeader: false
     severity: warning
     confidence: 0.8
-    errorCode: 0
-    warningCode: 0
     # https://github.com/mgechev/revive
     rules:
       - name: atomic

@@ -1,9 +1,0 @@
-integer bar
-bar = 3
-
-while ( bar )
-{
-    bar = bar - 1
-}
-
-return bar

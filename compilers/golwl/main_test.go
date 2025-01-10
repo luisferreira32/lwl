@@ -1,0 +1,106 @@
+package main
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"slices"
+	"testing"
+)
+
+func Test_parseFiles(t *testing.T) {
+	tests := []struct {
+		name      string
+		files     map[string]string // filename -> content
+		wantFuncs []function
+		wantErr   error
+	}{
+		{
+			name: "simple function declaration and call",
+			files: map[string]string{
+				"test.lwl": "f(x,y)=x+y\nf(1,2)\n",
+			},
+			wantFuncs: []function{
+				{
+					line: 1,
+					tkns: []token{
+						{t: variable, v: "f"},
+						{t: lparenth, v: "("},
+						{t: variable, v: "x"},
+						{t: co, v: ","},
+						{t: variable, v: "y"},
+						{t: rparenth, v: ")"},
+						{t: eq, v: "="},
+						{t: variable, v: "x"},
+						{t: add, v: "+"},
+						{t: variable, v: "y"},
+					},
+					main: false,
+				},
+				{
+					line: 2,
+					tkns: []token{
+						{t: variable, v: "f"},
+						{t: lparenth, v: "("},
+						{t: constant, v: "1"},
+						{t: co, v: ","},
+						{t: constant, v: "2"},
+						{t: rparenth, v: ")"},
+					},
+					main: true,
+				},
+			},
+		},
+		{
+			name: "empty file",
+			files: map[string]string{
+				"empty.lwl": "",
+			},
+			wantFuncs: []function{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create temporary directory
+			tempDir := t.TempDir()
+
+			// Create test files
+			var filePaths []string
+			for filename, content := range tc.files {
+				filePath := filepath.Join(tempDir, filename)
+				if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+					t.Fatalf("failed to write test file %s: %v", filename, err)
+				}
+				filePaths = append(filePaths, filePath)
+			}
+
+			// Run parseFiles
+			got, err := parseFunctions(filePaths)
+
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("parseFiles() error = %v, wantErr %v", err, tc.wantErr)
+			}
+
+			if len(tc.wantFuncs) != len(got) {
+				t.Fatalf("parseFiles() got %d functions, want %d", len(got), len(tc.wantFuncs))
+			}
+
+			for i := range tc.wantFuncs {
+				if tc.wantFuncs[i].name != got[i].name {
+					t.Errorf("function %d name = %v, want %v", i, got[i].name, tc.wantFuncs[i].name)
+				}
+				if tc.wantFuncs[i].line != got[i].line {
+					t.Errorf("function %d line = %v, want %v", i, got[i].line, tc.wantFuncs[i].line)
+				}
+				if !slices.EqualFunc(
+					tc.wantFuncs[i].tkns,
+					got[i].tkns,
+					func(a, b token) bool { return a.t == b.t && a.v == b.v },
+				) {
+					t.Errorf("function %d tokens = %v, want %v", i, got[i].tkns, tc.wantFuncs[i].tkns)
+				}
+			}
+		})
+	}
+}

@@ -1,6 +1,7 @@
 # common local work dirs
 **/bin
 **/tmp
+**/out
 .vscode
 
 # binaries and outputs
@@ -11,3 +12,4 @@
 *.dylib
 *.test
 *.out
+*.o
