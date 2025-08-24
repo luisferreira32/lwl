@@ -1,8 +1,0 @@
-integer32 integer_sum ( integer32 foo integer32 bar )
-{
-    integer32 foobar
-    foobar = foo + bar
-    return foobar
-}
-
-return integer_sum ( 0 0 )
