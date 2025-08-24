@@ -59,6 +59,26 @@ func Test_parseFiles(t *testing.T) {
 			},
 			wantFuncs: []function{},
 		},
+		{
+			name: "simple addition in main",
+			files: map[string]string{
+				"addition.lwl": "1+3+1\n",
+			},
+			wantFuncs: []function{
+				{
+					line: 1,
+					file: "addition.lwl",
+					tkns: []token{
+						{t: tconstant, v: "1"},
+						{t: tadd, v: "+"},
+						{t: tconstant, v: "3"},
+						{t: tadd, v: "+"},
+						{t: tconstant, v: "1"},
+					},
+					main: true,
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {

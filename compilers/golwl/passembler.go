@@ -1,5 +1,7 @@
 package main
 
+import "strconv"
+
 // This is a pseudo-assembler for the LWL language.
 // It will create a generic pseudo-assembly code that can be later be thrown in different architectures.
 
@@ -29,6 +31,19 @@ const (
 	rbp = "RBP"
 	rsp = "RSP"
 )
+
+func isRegister(s string) bool {
+	switch s {
+	case rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp:
+		return true
+	}
+	return false
+}
+
+func isConstant(s string) bool {
+	_, err := strconv.Atoi(s)
+	return err == nil
+}
 
 type instruction struct {
 	opcode opset
@@ -92,7 +107,7 @@ func passemble(functions []function) []instruction {
 				}
 				instructions = append(instructions,
 					instruction{opcode: movop, args: []string{t.v, rbx}},
-					instruction{opcode: addop, args: []string{rax, rbx}},
+					instruction{opcode: addop, args: []string{rbx, rax}},
 				)
 			}
 
@@ -108,26 +123,11 @@ func passemble(functions []function) []instruction {
 				}
 				instructions = append(instructions,
 					instruction{opcode: movop, args: []string{t.v, rbx}},
-					instruction{opcode: addop, args: []string{rax, rbx}},
+					instruction{opcode: addop, args: []string{rbx, rax}},
 				)
 			}
 
 			i++
-		}
-		for _, t := range f.tkns {
-			if t.t == tconstant {
-				instructions = append(instructions,
-					instruction{opcode: movop, args: []string{t.v, rax}},
-				)
-			}
-			if t.t == tadd {
-				instructions = append(instructions,
-					instruction{opcode: popop, args: []string{rbx}},
-					instruction{opcode: popop, args: []string{rax}},
-					instruction{opcode: addop, args: []string{rax, rbx}},
-					instruction{opcode: pushop, args: []string{rax}},
-				)
-			}
 		}
 
 		// epilogue

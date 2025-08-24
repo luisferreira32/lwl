@@ -141,6 +141,7 @@ func tokenize(files []string) ([]function, error) {
 					continue
 				}
 				f.tkns = append(f.tkns, t)
+				pt.t = t.t
 			}
 			functions = append(functions, f)
 		}

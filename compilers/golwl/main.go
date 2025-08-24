@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"log"
-	"os"
 )
 
 var (
@@ -18,9 +17,10 @@ func main() {
 
 	// parse input
 	var output string
-	flag.StringVar(&output, "o", "assembled.o", "output file name")
+	flag.StringVar(&output, "o", "output", "output file name")
+	flag.Parse()
 
-	files := os.Args[1:]
+	files := flag.Args()
 	if len(files) == 0 {
 		log.Fatalf("no input files provided")
 	}
