@@ -27,7 +27,7 @@ func Test_parse(t *testing.T) {
 						{t: tlparenth, v: "("},
 						{t: tvariable, v: "x"},
 						{t: trparenth, v: ")"},
-						{t: eq, v: "="},
+						{t: teq, v: "="},
 						{t: tvariable, v: "x"},
 					},
 				},
@@ -57,7 +57,7 @@ func Test_parse(t *testing.T) {
 						{t: tlparenth, v: "("},
 						{t: tvariable, v: "x"},
 						{t: trparenth, v: ")"},
-						{t: eq, v: "="},
+						{t: teq, v: "="},
 						{t: tvariable, v: "x"},
 					},
 				},
@@ -106,7 +106,7 @@ func Test_parse(t *testing.T) {
 						{t: tlparenth, v: "("},
 						{t: tvariable, v: "x"},
 						{t: trparenth, v: ")"},
-						{t: eq, v: "="},
+						{t: teq, v: "="},
 						{t: tvariable, v: "x"},
 					},
 				},
@@ -119,7 +119,7 @@ func Test_parse(t *testing.T) {
 						{t: tlparenth, v: "("},
 						{t: tvariable, v: "y"},
 						{t: trparenth, v: ")"},
-						{t: eq, v: "="},
+						{t: teq, v: "="},
 						{t: tvariable, v: "y"},
 					},
 				},
@@ -151,9 +151,9 @@ func Test_parse(t *testing.T) {
 						{t: tlparenth, v: "("},
 						{t: tvariable, v: "x"},
 						{t: trparenth, v: ")"},
-						{t: eq, v: "="},
+						{t: teq, v: "="},
 						{t: tvariable, v: "x"},
-						{t: eq, v: "="}, // Second equal sign
+						{t: teq, v: "="}, // Second equal sign
 						{t: tconstant, v: "1"},
 					},
 				},
@@ -185,7 +185,7 @@ func Test_parse(t *testing.T) {
 						{t: tlparenth, v: "("},
 						{t: tvariable, v: "x"},
 						{t: trparenth, v: ")"},
-						{t: eq, v: "="},
+						{t: teq, v: "="},
 						{t: tvariable, v: "y"}, // y is not defined
 					},
 				},
@@ -217,8 +217,8 @@ func Test_parse(t *testing.T) {
 						{t: tlparenth, v: "("},
 						{t: tvariable, v: "x"},
 						{t: trparenth, v: ")"},
-						{t: eq, v: "="},
-						{t: add, v: "+"}, // Operator with no preceding value
+						{t: teq, v: "="},
+						{t: tadd, v: "+"}, // Operator with no preceding value
 						{t: tvariable, v: "x"},
 					},
 				},
@@ -246,7 +246,7 @@ func Test_parse(t *testing.T) {
 					file: "test.lwl",
 					line: 1,
 					tkns: []token{
-						{t: add, v: "+"}, // Should start with variable or constant
+						{t: tadd, v: "+"}, // Should start with variable or constant
 						{t: tconstant, v: "1"},
 					},
 					main: true,

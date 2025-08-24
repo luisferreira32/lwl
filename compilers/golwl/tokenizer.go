@@ -10,18 +10,18 @@ import (
 type tokenType int
 
 const (
-	undefined tokenType = iota
+	tundefined tokenType = iota
 	tvariable
 	tconstant
 	tlparenth
 	trparenth
 	tcomma
-	add
-	sub
-	mul
-	div
-	mod
-	eq
+	tadd
+	tsub
+	tmul
+	tdiv
+	tmod
+	teq
 )
 
 type token struct {
@@ -34,7 +34,7 @@ func (t token) String() string {
 }
 
 func (t token) isOp() bool {
-	return t.t == add || t.t == sub || t.t == mul || t.t == div || t.t == mod
+	return t.t == tadd || t.t == tsub || t.t == tmul || t.t == tdiv || t.t == tmod
 }
 
 func tokenFromRune(r rune) (token, error) {
@@ -42,17 +42,17 @@ func tokenFromRune(r rune) (token, error) {
 	t.v = string(r)
 	switch r {
 	case '=':
-		t.t = eq
+		t.t = teq
 	case '+':
-		t.t = add
+		t.t = tadd
 	case '-':
-		t.t = sub
+		t.t = tsub
 	case '*':
-		t.t = mul
+		t.t = tmul
 	case '/':
-		t.t = div
+		t.t = tdiv
 	case '%':
-		t.t = mod
+		t.t = tmod
 	case '(':
 		t.t = tlparenth
 	case ')':
@@ -66,7 +66,7 @@ func tokenFromRune(r rune) (token, error) {
 			t.t = tconstant
 		}
 	}
-	if t.t == undefined {
+	if t.t == tundefined {
 		// TODO: better explain our ways of writing
 		return t, errors.New("invalid token: " + t.v)
 	}

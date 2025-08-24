@@ -14,7 +14,6 @@ var (
 
 func main() {
 	// TODO: logger with levels
-	// TODO: implement checking the architecture of the host machine and restrict to amd64 linux only for now
 	log.Printf("version: %v\n", version)
 
 	// parse input
@@ -39,20 +38,13 @@ func main() {
 		log.Fatalf("%v", err)
 	}
 
-	// 7. generate pseudo-assembly code
-	// TODO: make this a pseudo-assembly and add optimized plugins for different architectures
-	outputFile, err := os.Create(output)
-	if err != nil {
-		log.Fatalf("create %v: %v", output, err)
-	}
-	defer func() {
-		if err := outputFile.Close(); err != nil {
-			log.Fatalf("close %v: %v", output, err)
-		}
-	}()
+	// generate pseudo-assembly code
+	// TODO: add optimized plugins for different architectures
+	instructions := passemble(functions)
 
-	// hacks
-	for _, f := range functions {
-		outputFile.WriteString("# " + f.file + ":" + string(rune(f.line)) + "\n")
+	// TODO: implement checking the architecture of the host machine and restrict to amd64 linux only for now
+	err = magic(instructions, output)
+	if err != nil {
+		log.Fatalf("%v", err)
 	}
 }

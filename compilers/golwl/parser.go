@@ -14,6 +14,7 @@ var (
 
 // NOTE: for now parse only checks syntax parsing
 // there's no abstract syntax tree or semantic analysis due to the simplicity of the language
+// TODO: accept parenthesis syntax in expressions for grouping order
 func parse(functions []function) error {
 	functionRegistry := make(map[string]struct{})
 	mainFunctions := make([]function, 0, 1)
@@ -29,7 +30,7 @@ func parse(functions []function) error {
 		// check only one or zero eq are defined
 		eqCount := 0
 		for _, t := range f.tkns {
-			if t.t == eq {
+			if t.t == teq {
 				eqCount++
 			}
 		}
@@ -67,7 +68,7 @@ func parse(functions []function) error {
 				declaredVariables[t.v] = struct{}{}
 				continue
 			}
-			if t.t == eq {
+			if t.t == teq {
 				functionHeaderEnded = true
 				continue
 			}
@@ -97,12 +98,12 @@ func parse(functions []function) error {
 				continue
 			}
 
-			if t.t == tconstant && prevToken.t != tcomma && !prevToken.isOp() && prevToken.t != tlparenth && prevToken.t != eq {
+			if t.t == tconstant && prevToken.t != tcomma && !prevToken.isOp() && prevToken.t != tlparenth && prevToken.t != teq {
 				f.errs = append(f.errs, errors.New("unexpected constant after "+prevToken.v))
 				continue
 			}
 
-			if t.t == tvariable && prevToken.t != tcomma && !prevToken.isOp() && prevToken.t != tlparenth && prevToken.t != eq {
+			if t.t == tvariable && prevToken.t != tcomma && !prevToken.isOp() && prevToken.t != tlparenth && prevToken.t != teq {
 				f.errs = append(f.errs, errors.New("unexpected variable after "+prevToken.v))
 				continue
 			}
