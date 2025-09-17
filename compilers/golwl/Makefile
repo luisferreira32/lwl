@@ -11,13 +11,15 @@ LD            := ld
 OBJDUMP       := objdump
 OBJDUMP_FLAGS := -d -M intel
 
-C_SOURCES     := $(wildcard data/*.c)
+C_SOURCES   := $(wildcard data/*.c)
 S_SOURCES   := $(wildcard data/*.S)
-C_S_TARGETS   := $(patsubst data/%.c, out/%.c.s, $(C_SOURCES))
-C_O_TARGETS   := $(patsubst data/%.c, out/%.c.o.objdump, $(C_SOURCES))
-C_B_TARGETS   := $(patsubst data/%.c, out/%.c.bin.objdump, $(C_SOURCES))
+LWL_SOURCES := $(wildcard data/*.lwl)
+C_S_TARGETS := $(patsubst data/%.c, out/%.c.s, $(C_SOURCES))
+C_O_TARGETS := $(patsubst data/%.c, out/%.c.o.objdump, $(C_SOURCES))
+C_B_TARGETS := $(patsubst data/%.c, out/%.c.bin.objdump, $(C_SOURCES))
 S_O_TARGETS := $(patsubst data/%.S, out/%.S.o.objdump, $(S_SOURCES))
 S_B_TARGETS := $(patsubst data/%.S, out/%.S.bin.objdump, $(S_SOURCES))
+LWL_TARGETS := $(patsubst data/%.lwl, out/%, $(LWL_SOURCES))
 
 # ################################################################################## #
 #  Phonies                                                                           #
@@ -32,7 +34,7 @@ compile: bin/golwl
 test: bin/golwl bin/golwl.test
 
 .PHONY: gen
-gen: $(C_S_TARGETS) $(C_O_TARGETS) $(C_B_TARGETS) $(S_O_TARGETS) $(S_B_TARGETS)
+gen: $(C_S_TARGETS) $(C_O_TARGETS) $(C_B_TARGETS) $(S_O_TARGETS) $(S_B_TARGETS) $(LWL_TARGETS)
 
 .PHONY: clean
 clean:
@@ -77,3 +79,6 @@ out/%.S.bin: out/%.S.o
 
 out/%.S.bin.objdump: out/%.S.bin
 	$(OBJDUMP) $(OBJDUMP_FLAGS) $< > $@
+
+out/%: data/%.lwl bin/golwl
+	${BIN} -o $@ $<

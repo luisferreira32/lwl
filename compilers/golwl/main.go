@@ -43,6 +43,7 @@ func main() {
 	instructions := passemble(functions)
 
 	// TODO: implement checking the architecture of the host machine and restrict to amd64 linux only for now
+	// TODO: allow utilization of other assemblers/linkers besides assumed GNU tools
 	err = magic(instructions, output)
 	if err != nil {
 		log.Fatalf("%v", err)

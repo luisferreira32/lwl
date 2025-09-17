@@ -1,6 +1,8 @@
 package main
 
-import "strconv"
+import (
+	"strconv"
+)
 
 // This is a pseudo-assembler for the LWL language.
 // It will create a generic pseudo-assembly code that can be later be thrown in different architectures.
@@ -84,6 +86,7 @@ func passemble(functions []function) []instruction {
 			t := f.tkns[i]
 			// test: only know how to handle adding N numbers right now
 			if t.t != tconstant && t.t != tadd {
+				i++
 				continue
 			}
 
