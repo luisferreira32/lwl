@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+const (
+	mainFuncName = "main"
+)
+
 type tokenType int
 
 const (
@@ -60,7 +64,7 @@ func tokenFromRune(r rune) (token, error) {
 	case ',':
 		t.t = tcomma
 	default:
-		if r >= 'a' && r <= 'z' {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
 			t.t = tvariable
 		} else if r >= '0' && r <= '9' {
 			t.t = tconstant
@@ -109,6 +113,9 @@ func tokenize(files []string) ([]function, error) {
 			if err != nil {
 				f.errs = append(f.errs, err)
 				continue
+			}
+			if f.main {
+				f.name = mainFuncName
 			}
 			if !f.main && pt.t == tvariable {
 				f.name = pt.v

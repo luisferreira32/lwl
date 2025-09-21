@@ -16,9 +16,7 @@ func main() {
 	log.Printf("version: %v\n", version)
 
 	// parse input
-	var output string
-	flag.StringVar(&output, "o", "output", "output file name")
-	flag.Parse()
+	opts := parseOptions()
 
 	files := flag.Args()
 	if len(files) == 0 {
@@ -34,8 +32,13 @@ func main() {
 	// handle syntax
 	// TODO: gracefully handle syntax and semantic errors since they accumulate per function / line
 	// TODO: make it more obvious we expect functions to be defined in order and file name will matter for that order
-	if err := parse(functions); err != nil {
+	_, err = parse(functions)
+	if err != nil {
 		log.Fatalf("%v", err)
+	}
+
+	if opts.parseOnly {
+		return
 	}
 
 	// generate pseudo-assembly code
@@ -44,7 +47,7 @@ func main() {
 
 	// TODO: implement checking the architecture of the host machine and restrict to amd64 linux only for now
 	// TODO: allow utilization of other assemblers/linkers besides assumed GNU tools
-	err = magic(instructions, output)
+	err = magic(instructions, opts.output)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}

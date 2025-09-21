@@ -10,10 +10,11 @@ import (
 
 func Test_parse(t *testing.T) {
 	tests := []struct {
-		name      string
-		functions []function
-		wantErr   error
-		wantLog   string
+		name        string
+		functions   []function
+		wantErr     error
+		wantLog     string
+		wantOpTrees map[string]*operation
 	}{
 		{
 			name: "valid function and main",
@@ -42,6 +43,101 @@ func Test_parse(t *testing.T) {
 						{t: trparenth, v: ")"},
 					},
 					main: true,
+				},
+			},
+			wantOpTrees: map[string]*operation{
+				mainFuncName: {
+					op: token{v: "f", t: tvariable},
+					v: map[token]token{
+						{v: "x", t: tvariable}: {v: "1", t: tconstant},
+					},
+				},
+				"f": {
+					op: token{v: "x", t: tvariable},
+				},
+			},
+		},
+		{
+			name: "complex valid function and main",
+			functions: []function{
+				{
+					name: "f",
+					file: "test.lwl",
+					line: 1,
+					tkns: []token{
+						{t: tvariable, v: "f"},
+						{t: tlparenth, v: "("},
+						{t: tvariable, v: "x"},
+						{t: tcomma, v: ","},
+						{t: tvariable, v: "y"},
+						{t: trparenth, v: ")"},
+						{t: teq, v: "="},
+						{t: tvariable, v: "x"},
+						{t: tadd, v: "+"},
+						{t: tconstant, v: "2"},
+						{t: tmul, v: "*"},
+						{t: tvariable, v: "x"},
+						{t: tmul, v: "*"},
+						{t: tconstant, v: "2"},
+						{t: tadd, v: "+"},
+						{t: tvariable, v: "y"},
+						{t: tdiv, v: "/"},
+						{t: tvariable, v: "x"},
+					},
+				},
+				{
+					name: "",
+					file: "test.lwl",
+					line: 2,
+					tkns: []token{
+						{t: tvariable, v: "f"},
+						{t: tlparenth, v: "("},
+						{t: tconstant, v: "1"},
+						{t: tcomma, v: ","},
+						{t: tconstant, v: "1"},
+						{t: trparenth, v: ")"},
+					},
+					main: true,
+				},
+			},
+			wantOpTrees: map[string]*operation{
+				mainFuncName: {
+					op: token{v: "f", t: tvariable},
+					v: map[token]token{
+						{v: "x", t: tvariable}: {v: "1", t: tconstant},
+						{v: "y", t: tvariable}: {v: "1", t: tconstant},
+					},
+				},
+				"f": {
+					op: token{v: "+", t: tadd},
+					p: [2]*operation{
+						{
+							op: token{v: "+", t: tadd},
+							p: [2]*operation{
+								{op: token{t: tvariable, v: "x"}},
+								{
+									op: token{t: tmul, v: "*"},
+									p: [2]*operation{
+										{
+											op: token{t: tmul, v: "*"},
+											p: [2]*operation{
+												{op: token{t: tconstant, v: "2"}},
+												{op: token{t: tvariable, v: "x"}},
+											},
+										},
+										{op: token{t: tconstant, v: "2"}},
+									},
+								},
+							},
+						},
+						{
+							op: token{v: "/", t: tdiv},
+							p: [2]*operation{
+								{op: token{t: tvariable, v: "y"}},
+								{op: token{t: tvariable, v: "x"}},
+							},
+						},
+					},
 				},
 			},
 		},
@@ -263,13 +359,37 @@ func Test_parse(t *testing.T) {
 			originalOutput := log.Writer()
 			defer log.SetOutput(originalOutput)
 			log.SetOutput(&b) // TODO: make the logger parallel safe in unit tests
-			err := parse(tc.functions)
+			opTrees, err := parse(tc.functions)
 			if !errors.Is(err, tc.wantErr) {
 				t.Errorf("parse() error = %v, wantErr %v", err, tc.wantErr)
 			}
 			if !strings.Contains(b.String(), tc.wantLog) {
 				t.Errorf("log output = %v, want to contain %v", b.String(), tc.wantLog)
 			}
+			for fname := range tc.wantOpTrees {
+				opTree, ok1 := opTrees[fname]
+				wantOpTree, ok2 := tc.wantOpTrees[fname]
+				if !ok1 || !ok2 {
+					t.Fatalf("did not find expected op tree for function: %s", fname)
+				}
+				cmpOpTree(t, fname, opTree, wantOpTree, 0)
+			}
 		})
 	}
+}
+
+func cmpOpTree(t *testing.T, fname string, op *operation, wantOp *operation, l int) {
+	if op == nil && wantOp == nil {
+		return
+	}
+	if op == nil || wantOp == nil {
+		t.Errorf("%s(%d) unexpected op, want/got:\n%v\n%v\n", fname, l, wantOp, op)
+		return
+	}
+	if op.op != wantOp.op {
+		t.Errorf("%s(%d) unexpected op, want/got:\n%v\n%v\n", fname, l, wantOp, op)
+		return
+	}
+	cmpOpTree(t, fname, op.p[0], wantOp.p[0], l+1)
+	cmpOpTree(t, fname, op.p[1], wantOp.p[1], l+1)
 }
