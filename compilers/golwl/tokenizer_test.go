@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func Test_parseFiles(t *testing.T) {
+func Test_tokenize(t *testing.T) {
 	tests := []struct {
 		name      string
 		files     map[string]string // filename -> content
@@ -48,6 +48,91 @@ func Test_parseFiles(t *testing.T) {
 						{t: tconstant, v: "2"},
 						{t: trparenth, v: ")"},
 					},
+					name: "main",
+					main: true,
+				},
+			},
+		},
+		{
+			name: "functions are first class",
+			files: map[string]string{
+				"test.lwl": "f(x,y)=x+y\ng(x,y)=y(x,123)\ng(1,f)\n",
+			},
+			wantFuncs: []function{
+				{
+					line: 1,
+					tkns: []token{
+						{t: tvariable, v: "f"},
+						{t: tlparenth, v: "("},
+						{t: tvariable, v: "x"},
+						{t: tcomma, v: ","},
+						{t: tvariable, v: "y"},
+						{t: trparenth, v: ")"},
+						{t: teq, v: "="},
+						{t: tvariable, v: "x"},
+						{t: tadd, v: "+"},
+						{t: tvariable, v: "y"},
+					},
+					name: "f",
+					main: false,
+				},
+				{
+					line: 2,
+					tkns: []token{
+						{t: tvariable, v: "g"},
+						{t: tlparenth, v: "("},
+						{t: tvariable, v: "x"},
+						{t: tcomma, v: ","},
+						{t: tvariable, v: "y"},
+						{t: trparenth, v: ")"},
+						{t: teq, v: "="},
+						{t: tvariable, v: "y"},
+						{t: tlparenth, v: "("},
+						{t: tvariable, v: "x"},
+						{t: tcomma, v: ","},
+						{t: tconstant, v: "123"},
+						{t: trparenth, v: ")"},
+					},
+					name: "g",
+					main: false,
+				},
+				{
+					line: 3,
+					tkns: []token{
+						{t: tvariable, v: "g"},
+						{t: tlparenth, v: "("},
+						{t: tconstant, v: "1"},
+						{t: tcomma, v: ","},
+						{t: tvariable, v: "f"},
+						{t: trparenth, v: ")"},
+					},
+					name: "main",
+					main: true,
+				},
+			},
+		},
+		{
+			name: "can tokenize invalid stuff for parser to slam in the future",
+			files: map[string]string{
+				"test.lwl": "f=x\nf\n",
+			},
+			wantFuncs: []function{
+				{
+					line: 1,
+					tkns: []token{
+						{t: tvariable, v: "f"},
+						{t: teq, v: "="},
+						{t: tvariable, v: "x"},
+					},
+					name: "f",
+					main: false,
+				},
+				{
+					line: 2,
+					tkns: []token{
+						{t: tvariable, v: "f"},
+					},
+					name: "main",
 					main: true,
 				},
 			},
@@ -75,6 +160,7 @@ func Test_parseFiles(t *testing.T) {
 						{t: tadd, v: "+"},
 						{t: tconstant, v: "1"},
 					},
+					name: "main",
 					main: true,
 				},
 			},

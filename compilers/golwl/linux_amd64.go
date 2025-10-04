@@ -58,7 +58,7 @@ func toAs(i instruction) (string, error) {
 		return fmt.Sprintf("%s:", name), nil
 	default:
 	}
-	return "", errors.New("unhandled op") // TODO: actually handle other stuff and output meaningful errros
+	return "", errors.New("unhandled op: " + string(i.opcode)) // TODO: actually handle other stuff and output meaningful errros
 }
 
 func magic(instructions []instruction, outfileName string) error {

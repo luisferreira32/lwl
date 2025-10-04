@@ -14,7 +14,7 @@ func Test_parse(t *testing.T) {
 		functions   []function
 		wantErr     error
 		wantLog     string
-		wantOpTrees map[string]*operation
+		wantOpTrees map[fname]*operation
 	}{
 		{
 			name: "valid function and main",
@@ -45,7 +45,7 @@ func Test_parse(t *testing.T) {
 					main: true,
 				},
 			},
-			wantOpTrees: map[string]*operation{
+			wantOpTrees: map[fname]*operation{
 				mainFuncName: {
 					op: token{v: "f", t: tvariable},
 					v: map[token]token{
@@ -100,7 +100,7 @@ func Test_parse(t *testing.T) {
 					main: true,
 				},
 			},
-			wantOpTrees: map[string]*operation{
+			wantOpTrees: map[fname]*operation{
 				mainFuncName: {
 					op: token{v: "f", t: tvariable},
 					v: map[token]token{
@@ -302,6 +302,35 @@ func Test_parse(t *testing.T) {
 			wantLog: "undefined variable",
 		},
 		{
+			name: "undefined variable due to no argument declaration",
+			functions: []function{
+				{
+					name: "f",
+					file: "test.lwl",
+					line: 1,
+					tkns: []token{
+						{t: tvariable, v: "f"},
+						{t: teq, v: "="},
+						{t: tvariable, v: "y"}, // y is not defined
+					},
+				},
+				{
+					name: "",
+					file: "test.lwl",
+					line: 2,
+					tkns: []token{
+						{t: tvariable, v: "f"},
+						{t: tlparenth, v: "("},
+						{t: tconstant, v: "1"},
+						{t: trparenth, v: ")"},
+					},
+					main: true,
+				},
+			},
+			wantErr: errParse,
+			wantLog: "undefined variable",
+		},
+		{
 			name: "unexpected operator",
 			functions: []function{
 				{
@@ -351,6 +380,34 @@ func Test_parse(t *testing.T) {
 			wantErr: errParse,
 			wantLog: "must start with a variable or constant",
 		},
+		{
+			name: "function that is not properly declared",
+			functions: []function{
+				{
+					name: "",
+					file: "test.lwl",
+					line: 1,
+					tkns: []token{
+						{t: teq, v: "="}, // should start with declaration
+						{t: tvariable, v: "x"},
+					},
+				},
+				{
+					name: "",
+					file: "test.lwl",
+					line: 2,
+					tkns: []token{
+						{t: tvariable, v: "f"},
+						{t: tlparenth, v: "("},
+						{t: tconstant, v: "1"},
+						{t: trparenth, v: ")"},
+					},
+					main: true,
+				},
+			},
+			wantErr: errParse,
+			wantLog: "function on line 1 has no name",
+		},
 	}
 
 	for _, tc := range tests {
@@ -359,37 +416,37 @@ func Test_parse(t *testing.T) {
 			originalOutput := log.Writer()
 			defer log.SetOutput(originalOutput)
 			log.SetOutput(&b) // TODO: make the logger parallel safe in unit tests
-			opTrees, err := parse(tc.functions)
+			opTrees, err := parse(tc.functions, verboseDEBUG)
 			if !errors.Is(err, tc.wantErr) {
 				t.Errorf("parse() error = %v, wantErr %v", err, tc.wantErr)
 			}
 			if !strings.Contains(b.String(), tc.wantLog) {
 				t.Errorf("log output = %v, want to contain %v", b.String(), tc.wantLog)
 			}
-			for fname := range tc.wantOpTrees {
-				opTree, ok1 := opTrees[fname]
-				wantOpTree, ok2 := tc.wantOpTrees[fname]
+			for name := range tc.wantOpTrees {
+				opTree, ok1 := opTrees[name]
+				wantOpTree, ok2 := tc.wantOpTrees[name]
 				if !ok1 || !ok2 {
-					t.Fatalf("did not find expected op tree for function: %s", fname)
+					t.Fatalf("did not find expected op tree for function: %s", name)
 				}
-				cmpOpTree(t, fname, opTree, wantOpTree, 0)
+				cmpOpTree(t, name, opTree, wantOpTree, 0)
 			}
 		})
 	}
 }
 
-func cmpOpTree(t *testing.T, fname string, op *operation, wantOp *operation, l int) {
+func cmpOpTree(t *testing.T, name fname, op *operation, wantOp *operation, l int) {
 	if op == nil && wantOp == nil {
 		return
 	}
 	if op == nil || wantOp == nil {
-		t.Errorf("%s(%d) unexpected op, want/got:\n%v\n%v\n", fname, l, wantOp, op)
+		t.Errorf("%s(%d) unexpected op, want/got:\n%v\n%v\n", name, l, wantOp, op)
 		return
 	}
 	if op.op != wantOp.op {
-		t.Errorf("%s(%d) unexpected op, want/got:\n%v\n%v\n", fname, l, wantOp, op)
+		t.Errorf("%s(%d) unexpected op, want/got:\n%v\n%v\n", name, l, wantOp, op)
 		return
 	}
-	cmpOpTree(t, fname, op.p[0], wantOp.p[0], l+1)
-	cmpOpTree(t, fname, op.p[1], wantOp.p[1], l+1)
+	cmpOpTree(t, name, op.p[0], wantOp.p[0], l+1)
+	cmpOpTree(t, name, op.p[1], wantOp.p[1], l+1)
 }

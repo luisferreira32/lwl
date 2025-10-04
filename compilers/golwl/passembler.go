@@ -52,101 +52,39 @@ type instruction struct {
 	args   []string
 }
 
-func passemble(functions []function) []instruction {
+func passemble(ops map[fname]*operation, verboseLevel int) []instruction {
 	instructions := []instruction{}
-	for _, f := range functions {
+	for name := range ops {
 		// prologue
-		name := f.name
-		if f.main {
-			name = "_start"
-		}
 		instructions = append(instructions,
-			instruction{opcode: funcstart, args: []string{name}},
+			instruction{opcode: funcstart, args: []string{string(name)}},
+			instruction{opcode: pushop, args: []string{rbp}},
+			instruction{opcode: movop, args: []string{rbp, rsp}},
 		)
-		if !f.main {
-			instructions = append(instructions,
-				instruction{opcode: pushop, args: []string{rbp}},
-				instruction{opcode: movop, args: []string{rbp, rsp}},
-			)
-		}
+
 		// TODO: figure out MOD operator
 		// TODO: figure out function calls
 		// TODO: figure out most things...
 
 		// body
 
-		// TODO: this part must be done in the AST parsing, but this is a dummy test implementation to see something end-to-end
-		// since this only supports adding constants, we know it will always be const + const + const + ...
-
-		i := 0
-		for {
-			if i >= len(f.tkns) {
-				break
-			}
-			t := f.tkns[i]
-			// test: only know how to handle adding N numbers right now
-			if t.t != tconstant && t.t != tadd {
-				i++
-				continue
-			}
-
-			// a + b // TODO: this should really be done at AST level
-			if t.t == tconstant {
-				instructions = append(instructions, instruction{opcode: movop, args: []string{t.v, rax}})
-				i++
-				if i >= len(f.tkns) { // TODO: should never happen, but need AST handling for that
-					break
-				}
-				if f.tkns[i].t != tadd {
-					continue
-				}
-				i++
-				if i >= len(f.tkns) { // TODO: should never happen, but need AST handling for that
-					break
-				}
-				t = f.tkns[i]
-				if t.t != tconstant {
-					continue
-				}
-				instructions = append(instructions,
-					instruction{opcode: movop, args: []string{t.v, rbx}},
-					instruction{opcode: addop, args: []string{rbx, rax}},
-				)
-			}
-
-			// (had previously ADD in rax) + c
-			if t.t == tadd {
-				i++
-				if i >= len(f.tkns) { // TODO: should never happen, but need AST handling for that
-					break
-				}
-				t = f.tkns[i]
-				if t.t != tconstant {
-					continue
-				}
-				instructions = append(instructions,
-					instruction{opcode: movop, args: []string{t.v, rbx}},
-					instruction{opcode: addop, args: []string{rbx, rax}},
-				)
-			}
-
-			i++
-		}
-
 		// epilogue
-		if f.main {
-			instructions = append(instructions,
-				instruction{opcode: movop, args: []string{rax, rdi}},
-				instruction{opcode: movop, args: []string{"60", rax}},
-				instruction{opcode: syscallop, args: []string{}},
-			)
-		} else {
-			instructions = append(instructions,
-				instruction{opcode: popop, args: []string{rbp}},
-				instruction{opcode: retop, args: []string{}},
-			)
+		instructions = append(instructions,
+			instruction{opcode: popop, args: []string{rbp}},
+			instruction{opcode: retop, args: []string{}},
+		)
+	}
 
-		}
+	// now the hacks: call main from _start and ensure ret value goes to exit code
+	instructions = append(instructions,
+		instruction{opcode: funcstart, args: []string{"_start"}},
+		instruction{opcode: movop, args: []string{rax, rdi}},
+		instruction{opcode: movop, args: []string{"60", rax}},
+		instruction{opcode: syscallop, args: []string{}},
+	)
+
+	if verboseLevel >= verboseDEBUG {
+
 	}
 	return instructions
 }

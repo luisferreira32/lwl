@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"slices"
+	"strconv"
+	"strings"
 )
 
 var (
@@ -15,23 +17,27 @@ var (
 
 // not an AST, but close: a binary tree of operations
 type operation struct {
-	p  [2]*operation   // if nil, op should be variable or constant
-	op token           // only if isOp() == true, a variable or constant
-	v  map[token]token // if op is a function variable, map from variable to concrete value (variable or constant)
+	p  [2]*operation    // if nil, op should be variable or constant
+	op token            // only if isOp() == true, a variable or constant
+	v  map[token]token  // if op is a function variable, map from argument to concrete value (variable or constant)
+	a  map[string]token // if op is a root declaration, needs a list of variables
 }
 
-type fdeclaration struct {
-	name string
-	v    []string // variable names of the function
-}
+type fname string
 
 // TODO: accept parenthesis syntax in expressions for grouping order
-func parse(functions []function) (map[string]*operation, error) {
+// FIXME: just make this work properly... it is more than wrong, it is inexcusably terrible.
+func parse(functions []function, verboseLevel int) (map[fname]*operation, error) {
 	functionRegistry := make(map[string][]token) // function name to variable name list
 	mainFunctions := make([]function, 0, 1)
 	for i := range functions {
 		// TODO: make this possible to run in parallel and safer than this
 		f := &functions[i] // get the pointer to be able to append to errs
+
+		if f.name == "" && !f.main {
+			f.errs = append(f.errs, errors.New("function on line "+strconv.Itoa(f.line)+" has no name"))
+			continue
+		}
 		if _, exists := functionRegistry[f.name]; exists && !f.main {
 			f.errs = append(f.errs, errors.New("function "+f.name+" already defined"))
 			continue
@@ -157,7 +163,7 @@ func parse(functions []function) (map[string]*operation, error) {
 		return nil, fmt.Errorf("%w %v found errors", errParse, foundErrors)
 	}
 
-	ops := make(map[string]*operation, len(functions))
+	ops := make(map[fname]*operation, len(functions))
 	for _, f := range functions {
 		offSet := slices.IndexFunc(f.tkns, func(t token) bool { return t.t == teq })
 		offSet++ // account for main (-1) or skip "=" sign
@@ -196,15 +202,25 @@ func parse(functions []function) (map[string]*operation, error) {
 				opRoot = op
 			}
 		}
-		fname := f.name
-		if f.main {
-			fname = mainFuncName
+
+		a := make(map[string]token, 0)
+		for _, t := range f.tkns {
+			if _, ok := a[t.v]; ok || t.t != tvariable {
+				continue
+			}
+			a[t.v] = t
 		}
-		ops[fname] = opRoot
+		opRoot.a = a
+		if f.main {
+			ops[mainFuncName] = opRoot
+		} else {
+			ops[fname(f.name)] = opRoot
+		}
 	}
 
-	// TODO: only print on super duper verbose mode
-	printOperations(ops)
+	if verboseLevel >= verboseDEBUG {
+		printOperations(ops)
+	}
 	return ops, nil
 }
 
@@ -219,7 +235,7 @@ func parseFunctionVariableMapping(op *operation, f function, functionRegistry ma
 		op.v = make(map[token]token)
 		for _, v := range declaredVariables {
 			i++ // skip lparenthesis, or comma
-			op.v[v] = f.tkns[i]
+			op.v[v] = f.tkns[i+1]
 			i++ // skip rparenthesis, or go to comma
 		}
 	}
@@ -233,12 +249,12 @@ func printOp(op *operation, level int) {
 	if op == nil {
 		return
 	}
-	fmt.Printf("%d> %s \n", level, op.op)
+	fmt.Printf("%d>%s %s %v %v\n", level, strings.Repeat(" ", level), op.op, op.v, op.a)
 	printOp(op.p[0], level+1)
 	printOp(op.p[1], level+1)
 }
 
-func printOperations(ops map[string]*operation) {
+func printOperations(ops map[fname]*operation) {
 	for name, tree := range ops {
 		fmt.Printf("function: %s\n", name)
 		printOp(tree, 0)

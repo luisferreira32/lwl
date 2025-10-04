@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -31,6 +32,7 @@ const (
 type token struct {
 	t tokenType
 	v string
+	c int
 }
 
 func (t token) String() string {
@@ -41,8 +43,8 @@ func (t token) isOp() bool {
 	return t.t == tadd || t.t == tsub || t.t == tmul || t.t == tdiv || t.t == tmod
 }
 
-func tokenFromRune(r rune) (token, error) {
-	t := token{}
+func scanToken(r rune, c int) (token, error) {
+	t := token{c: c}
 	t.v = string(r)
 	switch r {
 	case '=':
@@ -88,6 +90,7 @@ type function struct {
 
 func tokenize(files []string) ([]function, error) {
 	functions := make([]function, 0)
+	// - yes, given file order matters. no, we won't inform the user about it.
 	for _, file := range files {
 		contents, err := os.ReadFile(file)
 		if err != nil {
@@ -108,47 +111,35 @@ func tokenize(files []string) ([]function, error) {
 				line: i + 1,
 				main: !strings.Contains(line, "="),
 			}
-			p := line[0]
-			pt, err := tokenFromRune(rune(p))
-			if err != nil {
-				f.errs = append(f.errs, err)
-				continue
-			}
-			if f.main {
-				f.name = mainFuncName
-			}
-			if !f.main && pt.t == tvariable {
-				f.name = pt.v
-			}
-			f.tkns = append(f.tkns, pt)
-
-			j := 0
-			for {
-				j++
-				if j >= len(line) {
-					break
-				}
-
+			pt := token{}
+			for j := 0; j < len(line); j++ {
 				// skip spaces
-				if line[j] == ' ' {
+				// TODO: proper whitespace list
+				if line[j] == ' ' || line[j] == '\t' {
 					continue
 				}
 
-				// any constant might have multiple digits, so we need to parse them all
-				if line[j] >= '0' && line[j] <= '9' && pt.t == tconstant {
-					t := f.tkns[len(f.tkns)-1]
-					t.v += string(line[j])
-					f.tkns[len(f.tkns)-1] = t
-					continue
-				}
-
-				t, err := tokenFromRune(rune(line[j]))
+				t, err := scanToken(rune(line[j]), j)
 				if err != nil {
 					f.errs = append(f.errs, err)
 					continue
 				}
+				// any constant might have multiple digits, so include them in the previous token
+				if t.t == tconstant && pt.t == tconstant {
+					f.tkns[len(f.tkns)-1].v += t.v
+					continue
+				}
 				f.tkns = append(f.tkns, t)
-				pt.t = t.t
+				pt = t
+			}
+
+			// add function names to simplify further logic
+			if f.main {
+				f.name = mainFuncName
+			} else if !f.main && len(f.tkns) > 0 && f.tkns[0].t == tvariable {
+				f.name = f.tkns[0].v
+			} else {
+				f.errs = append(f.errs, errors.New("useless line found: "+strconv.Itoa(f.line)))
 			}
 			functions = append(functions, f)
 		}

@@ -31,8 +31,8 @@ func main() {
 
 	// handle syntax
 	// TODO: gracefully handle syntax and semantic errors since they accumulate per function / line
-	// TODO: make it more obvious we expect functions to be defined in order and file name will matter for that order
-	_, err = parse(functions)
+	// TODO: make it more obvious we expect functions to be defined in order and file provided order name will matter
+	ops, err := parse(functions, opts.verbose)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -43,7 +43,11 @@ func main() {
 
 	// generate pseudo-assembly code
 	// TODO: add optimized plugins for different architectures
-	instructions := passemble(functions)
+	instructions := passemble(ops, opts.verbose)
+
+	if opts.pseudoAssembly {
+		return
+	}
 
 	// TODO: implement checking the architecture of the host machine and restrict to amd64 linux only for now
 	// TODO: allow utilization of other assemblers/linkers besides assumed GNU tools
